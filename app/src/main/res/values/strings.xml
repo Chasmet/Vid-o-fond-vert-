@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name">Fond Vert Studio</string>
+    <string name="tagline">Studio IA hors ligne</string>
+    <string name="camera">Caméra</string>
+    <string name="video">Vidéo</string>
+    <string name="photo">Photo</string>
+    <string name="importer">Importer</string>
+    <string name="exporter">Exporter</string>
+    <string name="background_title">Arrière-plan</string>
+    <string name="transparent">Transparent</string>
+    <string name="green">Vert</string>
+    <string name="black">Noir</string>
+    <string name="white">Blanc</string>
+    <string name="image">Image</string>
+    <string name="edge">Contour</string>
+    <string name="softness">Douceur</string>
+    <string name="ai_live">IA EN DIRECT</string>
+    <string name="preview_hint">Cadrez-vous : le fond sera retiré automatiquement</string>
+    <string name="record">Enregistrer</string>
+    <string name="stop">Arrêter</string>
+    <string name="switch_camera">Changer de caméra</string>
+    <string name="quality">Qualité d’export</string>
+    <string name="processing">Traitement IA en cours…</string>
+</resources>

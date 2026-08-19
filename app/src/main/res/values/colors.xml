@@ -1,0 +1,14 @@
+<resources>
+    <color name="ink">#F6F8FB</color>
+    <color name="ink_secondary">#9EA6B5</color>
+    <color name="surface">#11151D</color>
+    <color name="surface_raised">#1A202B</color>
+    <color name="surface_high">#252D3A</color>
+    <color name="background">#090C11</color>
+    <color name="accent">#25E6A2</color>
+    <color name="accent_dark">#09B978</color>
+    <color name="cyan">#31C7FF</color>
+    <color name="danger">#FF4567</color>
+    <color name="checker_light">#D8DCE3</color>
+    <color name="checker_dark">#AEB5C0</color>
+</resources>
