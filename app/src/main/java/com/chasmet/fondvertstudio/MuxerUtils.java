@@ -80,7 +80,9 @@ final class MuxerUtils {
             if (normalizedTime > durationUs) {
                 break;
             }
-            info.set(0, size, normalizedTime, extractor.getSampleFlags());
+            int codecFlags = (extractor.getSampleFlags() & MediaExtractor.SAMPLE_FLAG_SYNC) != 0
+                    ? MediaCodec.BUFFER_FLAG_KEY_FRAME : 0;
+            info.set(0, size, normalizedTime, codecFlags);
             muxer.writeSampleData(outputTrack, buffer, info);
             extractor.advance();
         }
