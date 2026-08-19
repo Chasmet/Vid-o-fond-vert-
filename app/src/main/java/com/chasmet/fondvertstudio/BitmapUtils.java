@@ -19,7 +19,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.IntBuffer;
 
 public final class BitmapUtils {
     private BitmapUtils() {
@@ -35,17 +34,35 @@ public final class BitmapUtils {
         int[] pixels = new int[width * height];
 
         if (pixelStride == 4) {
-            ByteBuffer ordered = buffer.duplicate().order(ByteOrder.BIG_ENDIAN);
+            ByteBuffer ordered = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
             int baseOffset = ordered.position();
-            if (rowStride == width * 4 && ordered.remaining() >= width * height * 4) {
-                ordered.asIntBuffer().get(pixels, 0, pixels.length);
-            } else {
-                for (int y = 0; y < height; y++) {
-                    ByteBuffer row = ordered.duplicate().order(ByteOrder.BIG_ENDIAN);
-                    row.position(baseOffset + y * rowStride);
-                    row.limit(baseOffset + y * rowStride + width * 4);
-                    IntBuffer ints = row.slice().order(ByteOrder.BIG_ENDIAN).asIntBuffer();
-                    ints.get(pixels, y * width, width);
+            boolean deviceUsesRgba = deviceUsesRgbaOrder(
+                    ordered, baseOffset, rowStride, width, height);
+            for (int y = 0; y < height; y++) {
+                int rowOffset = baseOffset + y * rowStride;
+                int targetOffset = y * width;
+                for (int x = 0; x < width; x++) {
+                    int packed = ordered.getInt(rowOffset + x * 4);
+                    int channel0 = packed & 0xFF;
+                    int channel1 = (packed >>> 8) & 0xFF;
+                    int channel2 = (packed >>> 16) & 0xFF;
+                    int channel3 = (packed >>> 24) & 0xFF;
+                    int alpha;
+                    int red;
+                    int green;
+                    int blue;
+                    if (deviceUsesRgba) {
+                        red = channel0;
+                        green = channel1;
+                        blue = channel2;
+                        alpha = channel3;
+                    } else {
+                        alpha = channel0;
+                        red = channel1;
+                        green = channel2;
+                        blue = channel3;
+                    }
+                    pixels[targetOffset + x] = Color.argb(alpha, red, green, blue);
                 }
             }
             return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
@@ -65,6 +82,36 @@ public final class BitmapUtils {
             }
         }
         return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+    }
+
+    /**
+     * CameraX documents A-R-G-B bytes for this output format, but a small number
+     * of vendor camera stacks expose R-G-B-A. The alpha channel is opaque for a
+     * camera frame, so sampling both ends lets us correct the order safely.
+     */
+    private static boolean deviceUsesRgbaOrder(ByteBuffer buffer, int baseOffset,
+                                               int rowStride, int width, int height) {
+        int samples = 0;
+        int opaqueFirst = 0;
+        int opaqueLast = 0;
+        int gridX = Math.max(1, width / 8);
+        int gridY = Math.max(1, height / 8);
+        for (int y = gridY / 2; y < height && samples < 64; y += gridY) {
+            for (int x = gridX / 2; x < width && samples < 64; x += gridX) {
+                int offset = baseOffset + y * rowStride + x * 4;
+                if (offset + 3 >= buffer.limit()) {
+                    continue;
+                }
+                if ((buffer.get(offset) & 0xFF) >= 252) {
+                    opaqueFirst++;
+                }
+                if ((buffer.get(offset + 3) & 0xFF) >= 252) {
+                    opaqueLast++;
+                }
+                samples++;
+            }
+        }
+        return samples > 0 && opaqueLast > opaqueFirst + Math.max(4, samples / 5);
     }
 
     public static Bitmap rotateAndMirror(Bitmap source, int degrees, boolean mirror) {
@@ -91,15 +138,27 @@ public final class BitmapUtils {
         int[] pixels = new int[width * height];
         source.getPixels(pixels, 0, width, 0, 0, width, height);
 
+        float[] refinedMask = refineMask(mask, maskWidth, maskHeight);
         float edge0 = clamp(threshold - softness, 0f, 1f);
         float edge1 = clamp(threshold + softness, edge0 + 0.001f, 1f);
+        float xScale = width <= 1 ? 0f : (float) (maskWidth - 1) / (width - 1);
+        float yScale = height <= 1 ? 0f : (float) (maskHeight - 1) / (height - 1);
         for (int y = 0; y < height; y++) {
-            int maskY = Math.min(maskHeight - 1, y * maskHeight / height);
+            float sourceY = y * yScale;
+            int y0 = Math.min(maskHeight - 1, (int) sourceY);
+            int y1 = Math.min(maskHeight - 1, y0 + 1);
+            float fy = sourceY - y0;
             int row = y * width;
-            int maskRow = maskY * maskWidth;
             for (int x = 0; x < width; x++) {
-                int maskX = Math.min(maskWidth - 1, x * maskWidth / width);
-                float confidence = mask[maskRow + maskX];
+                float sourceX = x * xScale;
+                int x0 = Math.min(maskWidth - 1, (int) sourceX);
+                int x1 = Math.min(maskWidth - 1, x0 + 1);
+                float fx = sourceX - x0;
+                float top = refinedMask[y0 * maskWidth + x0] * (1f - fx)
+                        + refinedMask[y0 * maskWidth + x1] * fx;
+                float bottom = refinedMask[y1 * maskWidth + x0] * (1f - fx)
+                        + refinedMask[y1 * maskWidth + x1] * fx;
+                float confidence = top * (1f - fy) + bottom * fy;
                 float alpha = smoothStep(edge0, edge1, confidence);
                 int original = pixels[row + x];
                 int originalAlpha = Color.alpha(original);
@@ -108,6 +167,32 @@ public final class BitmapUtils {
             }
         }
         return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+    }
+
+    private static float[] refineMask(float[] source, int width, int height) {
+        float[] horizontal = new float[source.length];
+        float[] output = new float[source.length];
+        for (int y = 0; y < height; y++) {
+            int row = y * width;
+            for (int x = 0; x < width; x++) {
+                int left = row + Math.max(0, x - 1);
+                int center = row + x;
+                int right = row + Math.min(width - 1, x + 1);
+                horizontal[center] = (source[left] + 2f * source[center]
+                        + source[right]) * 0.25f;
+            }
+        }
+        for (int y = 0; y < height; y++) {
+            int previousRow = Math.max(0, y - 1) * width;
+            int row = y * width;
+            int nextRow = Math.min(height - 1, y + 1) * width;
+            for (int x = 0; x < width; x++) {
+                output[row + x] = (horizontal[previousRow + x]
+                        + 2f * horizontal[row + x]
+                        + horizontal[nextRow + x]) * 0.25f;
+            }
+        }
+        return output;
     }
 
     public static Bitmap centerCrop(Bitmap source, int targetWidth, int targetHeight) {

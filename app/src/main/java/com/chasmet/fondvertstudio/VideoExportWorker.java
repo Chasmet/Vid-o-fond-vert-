@@ -23,6 +23,7 @@ public final class VideoExportWorker extends Worker {
     public static final String KEY_THRESHOLD = "threshold";
     public static final String KEY_SOFTNESS = "softness";
     public static final String KEY_QUALITY = "quality";
+    public static final String KEY_MIRROR_SOURCE = "mirror_source";
     public static final String KEY_PROGRESS = "progress";
     public static final String KEY_OUTPUT_URI = "output_uri";
     public static final String KEY_ERROR = "error";
@@ -54,9 +55,10 @@ public final class VideoExportWorker extends Worker {
         if (backgroundType == BackgroundSpec.Type.TRANSPARENT) {
             backgroundColor = Color.rgb(0, 255, 0);
         }
-        float threshold = getInputData().getFloat(KEY_THRESHOLD, 0.58f);
-        float softness = getInputData().getFloat(KEY_SOFTNESS, 0.16f);
+        float threshold = getInputData().getFloat(KEY_THRESHOLD, 0.46f);
+        float softness = getInputData().getFloat(KEY_SOFTNESS, 0.22f);
         int quality = getInputData().getInt(KEY_QUALITY, 720);
+        boolean mirrorSource = getInputData().getBoolean(KEY_MIRROR_SOURCE, false);
 
         Context context = getApplicationContext();
         File workDirectory = new File(context.getCacheDir(), "video_exports");
@@ -116,6 +118,9 @@ public final class VideoExportWorker extends Worker {
                     continue;
                 }
                 frame = orientFrame(frame, rotation, metadataWidth, metadataHeight);
+                if (mirrorSource) {
+                    frame = BitmapUtils.rotateAndMirror(frame, 0, true);
+                }
                 Bitmap prepared = BitmapUtils.centerCrop(frame, width, height);
                 frame.recycle();
 
@@ -229,6 +234,9 @@ public final class VideoExportWorker extends Worker {
         private Bitmap image;
         private MediaMetadataRetriever videoRetriever;
         private long videoDurationUs;
+        private int videoRotation;
+        private int videoOrientedWidth;
+        private int videoOrientedHeight;
 
         BackgroundProvider(Context context, BackgroundSpec.Type type, Uri uri,
                            int color, int maxDimension) throws IOException {
@@ -241,6 +249,19 @@ public final class VideoExportWorker extends Worker {
                 setDataSource(videoRetriever, context, uri);
                 videoDurationUs = readLong(videoRetriever,
                         MediaMetadataRetriever.METADATA_KEY_DURATION, 1L) * 1000L;
+                int width = readInt(videoRetriever,
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH, 720);
+                int height = readInt(videoRetriever,
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT, 1280);
+                videoRotation = readInt(videoRetriever,
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION, 0);
+                if (videoRotation == 90 || videoRotation == 270) {
+                    int swap = width;
+                    width = height;
+                    height = swap;
+                }
+                videoOrientedWidth = width;
+                videoOrientedHeight = height;
             }
         }
 
@@ -251,8 +272,10 @@ public final class VideoExportWorker extends Worker {
             if (type == BackgroundSpec.Type.VIDEO && videoRetriever != null) {
                 long target = videoDurationUs <= 0 ? 0 : timeUs % videoDurationUs;
                 Bitmap frame = videoRetriever.getFrameAtTime(target,
-                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+                        MediaMetadataRetriever.OPTION_CLOSEST);
                 if (frame != null) {
+                    frame = orientFrame(frame, videoRotation,
+                            videoOrientedWidth, videoOrientedHeight);
                     Bitmap prepared = BitmapUtils.centerCrop(frame, width, height);
                     frame.recycle();
                     return prepared;

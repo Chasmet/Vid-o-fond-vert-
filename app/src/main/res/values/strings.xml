@@ -1,6 +1,6 @@
 <resources>
     <string name="app_name">Fond Vert Studio</string>
-    <string name="tagline">Studio IA hors ligne</string>
+    <string name="tagline">Caméra détourée · décor intact</string>
     <string name="camera">Caméra</string>
     <string name="video">Vidéo</string>
     <string name="photo">Photo</string>
@@ -15,7 +15,7 @@
     <string name="edge">Contour</string>
     <string name="softness">Douceur</string>
     <string name="ai_live">IA EN DIRECT</string>
-    <string name="preview_hint">Cadrez-vous : le fond sera retiré automatiquement</string>
+    <string name="preview_hint">Seule ta caméra sera détourée. Le décor restera intact.</string>
     <string name="record">Enregistrer</string>
     <string name="stop">Arrêter</string>
     <string name="switch_camera">Changer de caméra</string>

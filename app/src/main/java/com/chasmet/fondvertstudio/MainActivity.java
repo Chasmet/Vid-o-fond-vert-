@@ -6,12 +6,14 @@ import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.graphics.drawable.Drawable;
-import android.media.MediaMetadataRetriever;
+import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Size;
 import android.view.View;
 import android.widget.ImageView;
@@ -46,48 +48,42 @@ import androidx.work.WorkInfo;
 import androidx.work.WorkManager;
 
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.button.MaterialButtonToggleGroup;
-import com.google.android.material.slider.Slider;
 import com.google.android.material.snackbar.Snackbar;
 import com.google.common.util.concurrent.ListenableFuture;
 
 import java.io.File;
-import java.io.IOException;
-import java.util.Arrays;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * One simple flow: choose an untouched background, film the camera, export.
+ */
 public final class MainActivity extends AppCompatActivity {
-    private enum SourceMode {
-        CAMERA,
-        VIDEO,
-        PHOTO
-    }
-
     private ImageView subjectPreview;
     private ImageView backgroundImage;
     private VideoView backgroundVideo;
     private View previewContainer;
     private TextView previewHint;
+    private TextView backgroundStatus;
+    private TextView recordingTimer;
     private LinearLayout processingOverlay;
     private ProgressBar processingProgress;
     private TextView processingText;
     private MaterialButton recordButton;
-    private MaterialButton importButton;
-    private MaterialButton exportButton;
     private MaterialButton flipCameraButton;
     private MaterialButton qualityButton;
-    private Slider thresholdSlider;
-    private Slider softnessSlider;
+    private MaterialButton maskModeButton;
+    private MaterialButton[] backgroundButtons;
 
     private final BackgroundSpec backgroundSpec = new BackgroundSpec();
-    private SourceMode sourceMode = SourceMode.CAMERA;
-    private Uri foregroundUri;
-    private Uri pendingBackgroundUri;
     private int quality = 720;
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
+    private int maskPreset;
+    private float threshold = 0.46f;
+    private float softness = 0.22f;
     private ProcessCameraProvider cameraProvider;
     private VideoCapture<Recorder> videoCapture;
     private Recording activeRecording;
@@ -97,6 +93,9 @@ public final class MainActivity extends AppCompatActivity {
     private final ExecutorService cameraExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService ioExecutor = Executors.newFixedThreadPool(2);
     private final AtomicInteger edgeGeneration = new AtomicInteger();
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private long recordingStartedAt;
+
     private Bitmap currentSource;
     private Bitmap currentCutout;
     private Bitmap backgroundPreviewBitmap;
@@ -104,10 +103,22 @@ public final class MainActivity extends AppCompatActivity {
     private int currentMaskWidth;
     private int currentMaskHeight;
 
-    private ActivityResultLauncher<String[]> foregroundPicker;
     private ActivityResultLauncher<String[]> backgroundImagePicker;
     private ActivityResultLauncher<String[]> backgroundVideoPicker;
     private ActivityResultLauncher<String[]> permissionLauncher;
+
+    private final Runnable timerTick = new Runnable() {
+        @Override
+        public void run() {
+            if (activeRecording == null) {
+                return;
+            }
+            String elapsed = formatDuration(SystemClock.elapsedRealtime() - recordingStartedAt);
+            recordingTimer.setText(elapsed);
+            recordButton.setText("■  ARRÊTER   " + elapsed);
+            uiHandler.postDelayed(this, 250L);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -116,13 +127,13 @@ public final class MainActivity extends AppCompatActivity {
         bindViews();
         registerLaunchers();
         setupControls();
-        previewContainer.setBackground(new CheckerboardDrawable(dp(18)));
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             showUnsupportedDialog();
             return;
         }
         segmenter = new SegmentationEngine(this);
+        segmenter.setEdgeSettings(threshold, softness);
         requestCameraPermissionsIfNeeded();
     }
 
@@ -132,203 +143,133 @@ public final class MainActivity extends AppCompatActivity {
         backgroundVideo = findViewById(R.id.backgroundVideo);
         previewContainer = findViewById(R.id.previewContainer);
         previewHint = findViewById(R.id.previewHint);
+        backgroundStatus = findViewById(R.id.backgroundStatus);
+        recordingTimer = findViewById(R.id.recordingTimer);
         processingOverlay = findViewById(R.id.processingOverlay);
         processingProgress = findViewById(R.id.processingProgress);
         processingText = findViewById(R.id.processingText);
         recordButton = findViewById(R.id.recordButton);
-        importButton = findViewById(R.id.importButton);
-        exportButton = findViewById(R.id.exportButton);
         flipCameraButton = findViewById(R.id.flipCameraButton);
         qualityButton = findViewById(R.id.qualityButton);
-        thresholdSlider = findViewById(R.id.thresholdSlider);
-        softnessSlider = findViewById(R.id.softnessSlider);
+        maskModeButton = findViewById(R.id.maskModeButton);
     }
 
     private void registerLaunchers() {
-        foregroundPicker = registerForActivityResult(
-                new ActivityResultContracts.OpenDocument(), this::onForegroundSelected);
         backgroundImagePicker = registerForActivityResult(
                 new ActivityResultContracts.OpenDocument(), uri -> {
-                    if (uri != null) {
-                        persistReadPermission(uri);
-                        pendingBackgroundUri = uri;
-                        backgroundSpec.setImage(uri);
-                        showImageBackground(uri);
-                        highlightBackgroundButton(R.id.bgImage);
+                    if (uri == null) {
+                        return;
                     }
+                    persistReadPermission(uri);
+                    backgroundSpec.setImage(uri);
+                    showImageBackground(uri);
+                    highlightBackgroundButton(R.id.bgImage);
+                    backgroundStatus.setText("DÉCOR · IMAGE INTACTE");
+                    Toast.makeText(this, "L’image reste intacte derrière toi",
+                            Toast.LENGTH_SHORT).show();
                 });
         backgroundVideoPicker = registerForActivityResult(
                 new ActivityResultContracts.OpenDocument(), uri -> {
-                    if (uri != null) {
-                        persistReadPermission(uri);
-                        pendingBackgroundUri = uri;
-                        backgroundSpec.setVideo(uri);
-                        showVideoBackground(uri);
-                        highlightBackgroundButton(R.id.bgVideo);
+                    if (uri == null) {
+                        return;
                     }
+                    persistReadPermission(uri);
+                    backgroundSpec.setVideo(uri);
+                    showVideoBackground(uri);
+                    highlightBackgroundButton(R.id.bgVideo);
+                    backgroundStatus.setText("DÉCOR · VIDÉO INTACTE");
+                    Toast.makeText(this, "La vidéo reste intacte derrière toi",
+                            Toast.LENGTH_SHORT).show();
                 });
         permissionLauncher = registerForActivityResult(
                 new ActivityResultContracts.RequestMultiplePermissions(), this::onPermissionsResult);
     }
 
     private void setupControls() {
-        MaterialButtonToggleGroup modeGroup = findViewById(R.id.modeGroup);
-        modeGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
-            if (!isChecked) {
-                return;
-            }
-            if (checkedId == R.id.modeCamera) {
-                setSourceMode(SourceMode.CAMERA);
-            } else if (checkedId == R.id.modeVideo) {
-                setSourceMode(SourceMode.VIDEO);
-            } else if (checkedId == R.id.modePhoto) {
-                setSourceMode(SourceMode.PHOTO);
-            }
-        });
+        MaterialButton imageButton = findViewById(R.id.bgImage);
+        MaterialButton videoButton = findViewById(R.id.bgVideo);
+        MaterialButton transparentButton = findViewById(R.id.bgTransparent);
+        MaterialButton greenButton = findViewById(R.id.bgGreen);
+        MaterialButton blackButton = findViewById(R.id.bgBlack);
+        MaterialButton whiteButton = findViewById(R.id.bgWhite);
+        backgroundButtons = new MaterialButton[]{imageButton, videoButton,
+                transparentButton, greenButton, blackButton, whiteButton};
 
-        findViewById(R.id.bgTransparent).setOnClickListener(v -> {
+        imageButton.setOnClickListener(v ->
+                backgroundImagePicker.launch(new String[]{"image/*"}));
+        videoButton.setOnClickListener(v ->
+                backgroundVideoPicker.launch(new String[]{"video/*"}));
+        transparentButton.setOnClickListener(v -> {
             backgroundSpec.setTransparent();
             showTransparentBackground();
             highlightBackgroundButton(R.id.bgTransparent);
+            backgroundStatus.setText("DÉCOR · SANS FOND");
         });
-        findViewById(R.id.bgGreen).setOnClickListener(v -> {
-            backgroundSpec.setColor(Color.rgb(0, 255, 0));
-            showColorBackground(Color.rgb(0, 255, 0));
-            highlightBackgroundButton(R.id.bgGreen);
-        });
-        findViewById(R.id.bgBlack).setOnClickListener(v -> {
-            backgroundSpec.setColor(Color.BLACK);
-            showColorBackground(Color.BLACK);
-            highlightBackgroundButton(R.id.bgBlack);
-        });
-        findViewById(R.id.bgWhite).setOnClickListener(v -> {
-            backgroundSpec.setColor(Color.WHITE);
-            showColorBackground(Color.WHITE);
-            highlightBackgroundButton(R.id.bgWhite);
-        });
-        findViewById(R.id.bgImage).setOnClickListener(v ->
-                backgroundImagePicker.launch(new String[]{"image/*"}));
-        findViewById(R.id.bgVideo).setOnClickListener(v ->
-                backgroundVideoPicker.launch(new String[]{"video/*"}));
+        greenButton.setOnClickListener(v -> selectColorBackground(
+                R.id.bgGreen, Color.rgb(0, 255, 0), "DÉCOR · VERT"));
+        blackButton.setOnClickListener(v -> selectColorBackground(
+                R.id.bgBlack, Color.BLACK, "DÉCOR · NOIR"));
+        whiteButton.setOnClickListener(v -> selectColorBackground(
+                R.id.bgWhite, Color.WHITE, "DÉCOR · BLANC"));
 
-        thresholdSlider.addOnChangeListener((slider, value, fromUser) -> updateEdgeSettings());
-        softnessSlider.addOnChangeListener((slider, value, fromUser) -> updateEdgeSettings());
-        importButton.setOnClickListener(v -> openForegroundPicker());
-        exportButton.setOnClickListener(v -> exportCurrentMedia());
-        recordButton.setOnClickListener(v -> onCenterAction());
+        recordButton.setOnClickListener(v -> {
+            if (activeRecording == null) {
+                startRecording();
+            } else {
+                stopRecording();
+            }
+        });
         flipCameraButton.setOnClickListener(v -> {
+            if (activeRecording != null) {
+                return;
+            }
             lensFacing = lensFacing == CameraSelector.LENS_FACING_FRONT
                     ? CameraSelector.LENS_FACING_BACK : CameraSelector.LENS_FACING_FRONT;
             startCamera();
         });
         qualityButton.setOnClickListener(v -> {
+            if (activeRecording != null) {
+                return;
+            }
             quality = quality == 720 ? 1080 : 720;
             qualityButton.setText(quality + "p");
-            Toast.makeText(this, "Export " + quality + "p", Toast.LENGTH_SHORT).show();
-        });
-        highlightBackgroundButton(R.id.bgTransparent);
-    }
-
-    private void setSourceMode(SourceMode mode) {
-        if (sourceMode == mode) {
-            return;
-        }
-        sourceMode = mode;
-        foregroundUri = null;
-        clearSubjectPreview();
-        if (mode == SourceMode.CAMERA) {
-            flipCameraButton.setVisibility(View.VISIBLE);
-            recordButton.setText("●");
             startCamera();
-        } else {
-            flipCameraButton.setVisibility(View.GONE);
-            recordButton.setText(mode == SourceMode.VIDEO ? "▶" : "◆");
-            stopCamera();
-            previewHint.setText(mode == SourceMode.VIDEO
-                    ? "Importez une vidéo à détourer"
-                    : "Importez une photo à détourer");
-            previewHint.setVisibility(View.VISIBLE);
-        }
-    }
-
-    private void openForegroundPicker() {
-        if (sourceMode == SourceMode.CAMERA) {
-            Toast.makeText(this, "Choisissez le mode Vidéo ou Photo", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        foregroundPicker.launch(sourceMode == SourceMode.VIDEO
-                ? new String[]{"video/*"} : new String[]{"image/*"});
-    }
-
-    private void onForegroundSelected(Uri uri) {
-        if (uri == null) {
-            return;
-        }
-        persistReadPermission(uri);
-        foregroundUri = uri;
-        showBusy(0, "Analyse du média…");
-        if (sourceMode == SourceMode.PHOTO) {
-            ioExecutor.execute(() -> {
-                try {
-                    Bitmap bitmap = BitmapUtils.decodeUri(this, uri, 2048);
-                    runOnUiThread(() -> processStillBitmap(bitmap));
-                } catch (Exception error) {
-                    runOnUiThread(() -> showError(error.getMessage()));
-                }
-            });
-        } else {
-            ioExecutor.execute(() -> {
-                try {
-                    Bitmap bitmap = extractVideoPreview(uri);
-                    runOnUiThread(() -> processStillBitmap(bitmap));
-                } catch (Exception error) {
-                    runOnUiThread(() -> showError(error.getMessage()));
-                }
-            });
-        }
-    }
-
-    private void processStillBitmap(Bitmap bitmap) {
-        if (segmenter == null) {
-            bitmap.recycle();
-            return;
-        }
-        segmenter.processStill(bitmap, new SegmentationEngine.Callback() {
-            @Override
-            public void onResult(SegmentationEngine.Result result) {
-                acceptResult(result);
-                hideBusy();
-            }
-
-            @Override
-            public void onError(Exception error) {
-                showError(error.getMessage());
-            }
+            Toast.makeText(this, "Enregistrement et export en " + quality + "p",
+                    Toast.LENGTH_SHORT).show();
         });
+        maskModeButton.setOnClickListener(v -> selectNextMaskPreset());
+
+        backgroundSpec.setColor(Color.rgb(0, 255, 0));
+        showColorBackground(Color.rgb(0, 255, 0));
+        highlightBackgroundButton(R.id.bgGreen);
     }
 
-    private Bitmap extractVideoPreview(Uri uri) throws IOException {
-        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
-        try {
-            setRetrieverDataSource(retriever, uri);
-            Bitmap bitmap = retriever.getFrameAtTime(0,
-                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
-            if (bitmap == null) {
-                throw new IOException("Aucune image lisible dans cette vidéo");
-            }
-            String rotationValue = retriever.extractMetadata(
-                    MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
-            int rotation = rotationValue == null ? 0 : Integer.parseInt(rotationValue);
-            if ((rotation == 90 || rotation == 270)
-                    && bitmap.getWidth() > bitmap.getHeight()) {
-                bitmap = BitmapUtils.rotateAndMirror(bitmap, rotation, false);
-            } else if (rotation == 180) {
-                bitmap = BitmapUtils.rotateAndMirror(bitmap, 180, false);
-            }
-            return bitmap;
-        } finally {
-            retriever.release();
+    private void selectColorBackground(int buttonId, int color, String label) {
+        backgroundSpec.setColor(color);
+        showColorBackground(color);
+        highlightBackgroundButton(buttonId);
+        backgroundStatus.setText(label);
+    }
+
+    private void selectNextMaskPreset() {
+        maskPreset = (maskPreset + 1) % 3;
+        if (maskPreset == 1) {
+            threshold = 0.38f;
+            softness = 0.28f;
+            maskModeButton.setText("Contour · Cheveux");
+        } else if (maskPreset == 2) {
+            threshold = 0.55f;
+            softness = 0.15f;
+            maskModeButton.setText("Contour · Net");
+        } else {
+            threshold = 0.46f;
+            softness = 0.22f;
+            maskModeButton.setText("Contour · Naturel");
         }
+        if (segmenter != null) {
+            segmenter.setEdgeSettings(threshold, softness);
+        }
+        refreshCurrentMask();
     }
 
     private void requestCameraPermissionsIfNeeded() {
@@ -336,25 +277,29 @@ public final class MainActivity extends AppCompatActivity {
                 Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
         boolean audioGranted = ContextCompat.checkSelfPermission(this,
                 Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-        if (cameraGranted && audioGranted) {
+        if (cameraGranted) {
             startCamera();
-        } else {
+        }
+        if (!cameraGranted || !audioGranted) {
             permissionLauncher.launch(new String[]{
                     Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO});
         }
     }
 
     private void onPermissionsResult(Map<String, Boolean> result) {
-        if (Boolean.TRUE.equals(result.get(Manifest.permission.CAMERA))) {
+        boolean cameraGranted = Boolean.TRUE.equals(result.get(Manifest.permission.CAMERA))
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED;
+        if (cameraGranted) {
             startCamera();
         } else {
-            Toast.makeText(this, "La caméra est nécessaire pour filmer",
+            Toast.makeText(this, "La caméra est nécessaire pour te filmer",
                     Toast.LENGTH_LONG).show();
         }
     }
 
     private void startCamera() {
-        if (sourceMode != SourceMode.CAMERA || segmenter == null
+        if (segmenter == null || activeRecording != null
                 || ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED) {
             return;
@@ -371,7 +316,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void bindCameraUseCases() {
-        if (cameraProvider == null) {
+        if (cameraProvider == null || activeRecording != null) {
             return;
         }
         cameraProvider.unbindAll();
@@ -382,11 +327,10 @@ public final class MainActivity extends AppCompatActivity {
                 .build();
         analysis.setAnalyzer(cameraExecutor, this::analyzeCameraFrame);
 
-        QualitySelector selector = QualitySelector.from(Quality.HD,
+        Quality preferred = quality == 1080 ? Quality.FHD : Quality.HD;
+        QualitySelector selector = QualitySelector.from(preferred,
                 FallbackStrategy.lowerQualityOrHigherThan(Quality.SD));
-        Recorder recorder = new Recorder.Builder()
-                .setQualitySelector(selector)
-                .build();
+        Recorder recorder = new Recorder.Builder().setQualitySelector(selector).build();
         videoCapture = VideoCapture.withOutput(recorder);
         CameraSelector cameraSelector = new CameraSelector.Builder()
                 .requireLensFacing(lensFacing)
@@ -394,61 +338,33 @@ public final class MainActivity extends AppCompatActivity {
         try {
             cameraProvider.bindToLifecycle(this, cameraSelector, analysis, videoCapture);
         } catch (Exception error) {
-            showError("Ce téléphone ne permet pas cette combinaison caméra");
+            showError("Cette caméra ne permet pas ce mode vidéo");
         }
     }
 
     private void analyzeCameraFrame(@NonNull ImageProxy imageProxy) {
+        Bitmap bitmap;
+        int rotation = imageProxy.getImageInfo().getRotationDegrees();
         try {
-            int rotation = imageProxy.getImageInfo().getRotationDegrees();
-            Bitmap bitmap = BitmapUtils.fromRgbaImageProxy(imageProxy);
-            imageProxy.close();
-            bitmap = BitmapUtils.rotateAndMirror(bitmap, rotation,
-                    lensFacing == CameraSelector.LENS_FACING_FRONT);
-            Bitmap finalBitmap = bitmap;
-            segmenter.processStream(finalBitmap, new SegmentationEngine.Callback() {
-                @Override
-                public void onResult(SegmentationEngine.Result result) {
-                    if (sourceMode == SourceMode.CAMERA) {
-                        acceptResult(result);
-                    } else {
-                        result.source.recycle();
-                        result.cutout.recycle();
-                    }
-                }
-
-                @Override
-                public void onError(Exception error) {
-                    // Une frame perdue est ignorée pour garder un aperçu fluide.
-                }
-            });
-        } catch (Exception error) {
+            bitmap = BitmapUtils.fromRgbaImageProxy(imageProxy);
+        } catch (Exception ignored) {
+            return;
+        } finally {
             imageProxy.close();
         }
-    }
-
-    private void stopCamera() {
-        if (activeRecording != null) {
-            activeRecording.stop();
-            activeRecording = null;
-        }
-        if (cameraProvider != null) {
-            cameraProvider.unbindAll();
-        }
-    }
-
-    private void onCenterAction() {
-        if (sourceMode == SourceMode.CAMERA) {
-            if (activeRecording == null) {
-                startRecording();
-            } else {
-                stopRecording();
+        bitmap = BitmapUtils.rotateAndMirror(bitmap, rotation,
+                lensFacing == CameraSelector.LENS_FACING_FRONT);
+        segmenter.processStream(bitmap, new SegmentationEngine.Callback() {
+            @Override
+            public void onResult(SegmentationEngine.Result result) {
+                acceptResult(result);
             }
-        } else if (foregroundUri == null) {
-            openForegroundPicker();
-        } else {
-            exportCurrentMedia();
-        }
+
+            @Override
+            public void onError(Exception error) {
+                // A dropped frame is expected on slower phones; the next frame replaces it.
+            }
+        });
     }
 
     private void startRecording() {
@@ -461,64 +377,79 @@ public final class MainActivity extends AppCompatActivity {
             directory = getCacheDir();
         }
         activeRawFile = new File(directory,
-                "raw_fond_vert_" + System.currentTimeMillis() + ".mp4");
+                "camera_source_" + System.currentTimeMillis() + ".mp4");
         FileOutputOptions options = new FileOutputOptions.Builder(activeRawFile).build();
         PendingRecording pending = videoCapture.getOutput().prepareRecording(this, options);
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 == PackageManager.PERMISSION_GRANTED) {
             pending = pending.withAudioEnabled();
         }
-        activeRecording = pending.start(ContextCompat.getMainExecutor(this), event -> {
-            if (event instanceof VideoRecordEvent.Start) {
-                recordButton.setText("■");
-                recordButton.setBackgroundResource(R.drawable.bg_circle_recording);
-            } else if (event instanceof VideoRecordEvent.Finalize) {
-                VideoRecordEvent.Finalize finalized = (VideoRecordEvent.Finalize) event;
-                activeRecording = null;
-                recordButton.setText("●");
-                recordButton.setBackgroundResource(R.drawable.bg_circle_accent);
-                if (finalized.getError() == VideoRecordEvent.Finalize.ERROR_NONE
-                        && activeRawFile != null && activeRawFile.exists()) {
-                    foregroundUri = Uri.fromFile(activeRawFile);
-                    enqueueVideoExport(foregroundUri);
-                } else {
-                    showError("Enregistrement interrompu");
+        if (backgroundSpec.getType() == BackgroundSpec.Type.VIDEO) {
+            backgroundVideo.seekTo(0);
+            backgroundVideo.start();
+        }
+        recordButton.setEnabled(false);
+        try {
+            activeRecording = pending.start(ContextCompat.getMainExecutor(this), event -> {
+                if (event instanceof VideoRecordEvent.Start) {
+                    showRecordingUi();
+                } else if (event instanceof VideoRecordEvent.Finalize) {
+                    VideoRecordEvent.Finalize finalized = (VideoRecordEvent.Finalize) event;
+                    activeRecording = null;
+                    showIdleUi();
+                    if (finalized.getError() == VideoRecordEvent.Finalize.ERROR_NONE
+                            && activeRawFile != null && activeRawFile.exists()) {
+                        enqueueVideoExport(Uri.fromFile(activeRawFile));
+                    } else {
+                        showError("Enregistrement interrompu");
+                    }
                 }
-            }
-        });
+            });
+        } catch (Exception error) {
+            activeRecording = null;
+            showIdleUi();
+            showError("Impossible de démarrer l’enregistrement");
+        }
     }
 
     private void stopRecording() {
-        if (activeRecording != null) {
-            activeRecording.stop();
+        if (activeRecording == null) {
+            return;
         }
+        recordButton.setEnabled(false);
+        recordButton.setText("Finalisation…");
+        activeRecording.stop();
     }
 
-    private void exportCurrentMedia() {
-        if (sourceMode == SourceMode.CAMERA) {
-            if (activeRecording != null) {
-                stopRecording();
-            } else {
-                Toast.makeText(this, "Appuyez sur le bouton central pour filmer",
-                        Toast.LENGTH_SHORT).show();
-            }
-            return;
-        }
-        if (foregroundUri == null || currentCutout == null) {
-            Toast.makeText(this, "Importez d’abord un média", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (sourceMode == SourceMode.VIDEO) {
-            enqueueVideoExport(foregroundUri);
-        } else {
-            exportPhoto();
-        }
+    private void showRecordingUi() {
+        recordingStartedAt = SystemClock.elapsedRealtime();
+        recordingTimer.setText("00:00");
+        recordingTimer.setVisibility(View.VISIBLE);
+        recordButton.setText("■  ARRÊTER   00:00");
+        recordButton.setEnabled(true);
+        recordButton.setBackgroundTintList(ColorStateList.valueOf(
+                ContextCompat.getColor(this, R.color.danger)));
+        backgroundStatus.setText("● ENREGISTREMENT");
+        setControlsEnabled(false);
+        uiHandler.removeCallbacks(timerTick);
+        uiHandler.post(timerTick);
+    }
+
+    private void showIdleUi() {
+        uiHandler.removeCallbacks(timerTick);
+        recordingTimer.setVisibility(View.GONE);
+        recordButton.setText("●  ENREGISTRER");
+        recordButton.setBackgroundTintList(ColorStateList.valueOf(
+                ContextCompat.getColor(this, R.color.danger)));
+        recordButton.setEnabled(true);
+        setControlsEnabled(true);
+        updateBackgroundStatus();
     }
 
     private void enqueueVideoExport(Uri sourceUri) {
         if (backgroundSpec.getType() == BackgroundSpec.Type.TRANSPARENT) {
             Toast.makeText(this,
-                    "La vidéo MP4 sera exportée sur vert pur pour CapCut",
+                    "Sans décor, le MP4 utilise un vert pur compatible CapCut",
                     Toast.LENGTH_LONG).show();
         }
         Data.Builder input = new Data.Builder()
@@ -526,9 +457,11 @@ public final class MainActivity extends AppCompatActivity {
                 .putString(VideoExportWorker.KEY_BACKGROUND_TYPE,
                         backgroundSpec.getType().name())
                 .putInt(VideoExportWorker.KEY_BACKGROUND_COLOR, backgroundSpec.getColor())
-                .putFloat(VideoExportWorker.KEY_THRESHOLD, thresholdSlider.getValue())
-                .putFloat(VideoExportWorker.KEY_SOFTNESS, softnessSlider.getValue())
-                .putInt(VideoExportWorker.KEY_QUALITY, quality);
+                .putFloat(VideoExportWorker.KEY_THRESHOLD, threshold)
+                .putFloat(VideoExportWorker.KEY_SOFTNESS, softness)
+                .putInt(VideoExportWorker.KEY_QUALITY, quality)
+                .putBoolean(VideoExportWorker.KEY_MIRROR_SOURCE,
+                        lensFacing == CameraSelector.LENS_FACING_FRONT);
         if (backgroundSpec.getUri() != null) {
             input.putString(VideoExportWorker.KEY_BACKGROUND_URI,
                     backgroundSpec.getUri().toString());
@@ -541,7 +474,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void observeExport(OneTimeWorkRequest request) {
-        showBusy(0, "Détourage et export…");
+        showBusy(0, "Création de ta vidéo…");
         WorkManager.getInstance(this).getWorkInfoByIdLiveData(request.getId())
                 .observe(this, info -> {
                     if (info == null) {
@@ -550,72 +483,26 @@ public final class MainActivity extends AppCompatActivity {
                     int progress = info.getProgress().getInt(
                             VideoExportWorker.KEY_PROGRESS, 0);
                     processingProgress.setProgress(progress);
-                    processingText.setText("Détourage et export… " + progress + "%");
+                    processingText.setText("Détourage de la caméra… " + progress + "%");
                     if (info.getState() == WorkInfo.State.SUCCEEDED) {
                         hideBusy();
                         String output = info.getOutputData().getString(
                                 VideoExportWorker.KEY_OUTPUT_URI);
-                        if (activeRawFile != null && activeRawFile.exists()) {
-                            //noinspection ResultOfMethodCallIgnored
-                            activeRawFile.delete();
-                            activeRawFile = null;
-                        }
+                        deleteRawRecording();
                         if (output != null) {
-                            showSavedSnackbar(Uri.parse(output), "video/mp4");
+                            showSavedSnackbar(Uri.parse(output));
                         }
                     } else if (info.getState() == WorkInfo.State.FAILED
                             || info.getState() == WorkInfo.State.CANCELLED) {
                         String error = info.getOutputData().getString(VideoExportWorker.KEY_ERROR);
+                        deleteRawRecording();
                         showError(error == null ? "Échec de l’export" : error);
                     }
                 });
     }
 
-    private void exportPhoto() {
-        Bitmap cutout = currentCutout.copy(Bitmap.Config.ARGB_8888, false);
-        BackgroundSpec.Type type = backgroundSpec.getType();
-        int color = backgroundSpec.getColor();
-        Uri backgroundUri = backgroundSpec.getUri();
-        showBusy(20, "Création du PNG…");
-        ioExecutor.execute(() -> {
-            Bitmap output = null;
-            Bitmap background = null;
-            try {
-                if (type == BackgroundSpec.Type.TRANSPARENT) {
-                    output = cutout;
-                } else {
-                    if (type == BackgroundSpec.Type.IMAGE && backgroundUri != null) {
-                        background = BitmapUtils.decodeUri(this, backgroundUri, 2048);
-                    } else if (type == BackgroundSpec.Type.VIDEO && backgroundUri != null) {
-                        background = extractVideoPreview(backgroundUri);
-                    }
-                    output = BitmapUtils.composite(cutout, background, color,
-                            cutout.getWidth(), cutout.getHeight());
-                    cutout.recycle();
-                }
-                Uri saved = MediaStoreSaver.savePng(this, output,
-                        "FondVert_" + System.currentTimeMillis() + ".png");
-                output.recycle();
-                if (background != null) {
-                    background.recycle();
-                }
-                runOnUiThread(() -> {
-                    hideBusy();
-                    showSavedSnackbar(saved, "image/png");
-                });
-            } catch (Exception error) {
-                if (output != null && !output.isRecycled()) {
-                    output.recycle();
-                }
-                if (background != null && !background.isRecycled()) {
-                    background.recycle();
-                }
-                runOnUiThread(() -> showError(error.getMessage()));
-            }
-        });
-    }
-
     private void acceptResult(SegmentationEngine.Result result) {
+        edgeGeneration.incrementAndGet();
         Bitmap oldSource = currentSource;
         Bitmap oldCutout = currentCutout;
         currentSource = result.source;
@@ -633,24 +520,21 @@ public final class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void updateEdgeSettings() {
-        float threshold = thresholdSlider.getValue();
-        float softness = softnessSlider.getValue();
-        if (segmenter != null) {
-            segmenter.setEdgeSettings(threshold, softness);
-        }
+    private void refreshCurrentMask() {
         Bitmap source = currentSource;
         float[] mask = currentMask;
-        if (source == null || mask == null) {
+        if (source == null || mask == null || source.isRecycled()) {
             return;
         }
         int generation = edgeGeneration.incrementAndGet();
         Bitmap safeSource = source.copy(Bitmap.Config.ARGB_8888, false);
         int maskWidth = currentMaskWidth;
         int maskHeight = currentMaskHeight;
+        float localThreshold = threshold;
+        float localSoftness = softness;
         ioExecutor.execute(() -> {
             Bitmap refreshed = BitmapUtils.applyMask(safeSource, mask,
-                    maskWidth, maskHeight, threshold, softness);
+                    maskWidth, maskHeight, localThreshold, localSoftness);
             safeSource.recycle();
             runOnUiThread(() -> {
                 if (generation != edgeGeneration.get()) {
@@ -684,10 +568,11 @@ public final class MainActivity extends AppCompatActivity {
     private void showImageBackground(Uri uri) {
         backgroundVideo.stopPlayback();
         backgroundVideo.setVisibility(View.GONE);
+        backgroundImage.setVisibility(View.GONE);
         previewContainer.setBackgroundColor(Color.BLACK);
         ioExecutor.execute(() -> {
             try {
-                Bitmap bitmap = BitmapUtils.decodeUri(this, uri, 2048);
+                Bitmap bitmap = BitmapUtils.decodeUri(this, uri, 2160);
                 runOnUiThread(() -> {
                     Bitmap old = backgroundPreviewBitmap;
                     backgroundPreviewBitmap = bitmap;
@@ -711,24 +596,102 @@ public final class MainActivity extends AppCompatActivity {
         backgroundVideo.setOnPreparedListener(player -> {
             player.setLooping(true);
             player.setVolume(0f, 0f);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+                player.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
+            }
             backgroundVideo.start();
         });
     }
 
     private void highlightBackgroundButton(int selectedId) {
-        int[] ids = {R.id.bgTransparent, R.id.bgGreen, R.id.bgBlack,
-                R.id.bgWhite, R.id.bgImage, R.id.bgVideo};
-        for (int id : ids) {
-            MaterialButton button = findViewById(id);
-            boolean selected = id == selectedId;
+        for (MaterialButton button : backgroundButtons) {
+            boolean selected = button.getId() == selectedId;
             button.setStrokeWidth(dp(selected ? 2 : 1));
-            button.setStrokeColor(ColorStateList.valueOf(selected
-                    ? ContextCompat.getColor(this, R.color.accent)
-                    : ContextCompat.getColor(this, R.color.surface_high)));
-            button.setTextColor(selected
-                    ? ContextCompat.getColor(this, R.color.accent)
-                    : ContextCompat.getColor(this, R.color.ink));
+            button.setStrokeColor(ColorStateList.valueOf(ContextCompat.getColor(this,
+                    selected ? R.color.accent : R.color.surface_high)));
+            button.setTextColor(ContextCompat.getColor(this,
+                    selected ? R.color.accent : R.color.ink));
         }
+    }
+
+    private void updateBackgroundStatus() {
+        switch (backgroundSpec.getType()) {
+            case IMAGE:
+                backgroundStatus.setText("DÉCOR · IMAGE INTACTE");
+                break;
+            case VIDEO:
+                backgroundStatus.setText("DÉCOR · VIDÉO INTACTE");
+                break;
+            case TRANSPARENT:
+                backgroundStatus.setText("DÉCOR · SANS FOND");
+                break;
+            case COLOR:
+            default:
+                int color = backgroundSpec.getColor();
+                backgroundStatus.setText(color == Color.BLACK ? "DÉCOR · NOIR"
+                        : color == Color.WHITE ? "DÉCOR · BLANC" : "DÉCOR · VERT");
+                break;
+        }
+    }
+
+    private void setControlsEnabled(boolean enabled) {
+        for (MaterialButton button : backgroundButtons) {
+            button.setEnabled(enabled);
+        }
+        flipCameraButton.setEnabled(enabled);
+        qualityButton.setEnabled(enabled);
+        maskModeButton.setEnabled(enabled);
+    }
+
+    private void showBusy(int progress, String text) {
+        processingProgress.setProgress(progress);
+        processingText.setText(text);
+        processingOverlay.setVisibility(View.VISIBLE);
+        recordButton.setEnabled(false);
+        setControlsEnabled(false);
+    }
+
+    private void hideBusy() {
+        processingOverlay.setVisibility(View.GONE);
+        recordButton.setEnabled(true);
+        setControlsEnabled(true);
+    }
+
+    private void showError(String message) {
+        hideBusy();
+        Toast.makeText(this, message == null ? "Une erreur est survenue" : message,
+                Toast.LENGTH_LONG).show();
+    }
+
+    private void showSavedSnackbar(Uri uri) {
+        Snackbar.make(recordButton, "Vidéo enregistrée dans la galerie",
+                        Snackbar.LENGTH_LONG)
+                .setAction("Ouvrir", v -> {
+                    Intent intent = new Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(uri, "video/mp4")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    try {
+                        startActivity(intent);
+                    } catch (Exception error) {
+                        Toast.makeText(this, "Vidéo : " + uri, Toast.LENGTH_LONG).show();
+                    }
+                }).show();
+    }
+
+    private void persistReadPermission(Uri uri) {
+        try {
+            getContentResolver().takePersistableUriPermission(uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException ignored) {
+        }
+    }
+
+    private void deleteRawRecording() {
+        if (activeRawFile != null && activeRawFile.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            activeRawFile.delete();
+        }
+        activeRawFile = null;
     }
 
     private void clearSubjectPreview() {
@@ -744,56 +707,14 @@ public final class MainActivity extends AppCompatActivity {
         currentMask = null;
     }
 
-    private void showBusy(int progress, String text) {
-        processingProgress.setProgress(progress);
-        processingText.setText(text);
-        processingOverlay.setVisibility(View.VISIBLE);
-    }
-
-    private void hideBusy() {
-        processingOverlay.setVisibility(View.GONE);
-    }
-
-    private void showError(String message) {
-        hideBusy();
-        Toast.makeText(this, message == null ? "Une erreur est survenue" : message,
-                Toast.LENGTH_LONG).show();
-    }
-
-    private void showSavedSnackbar(Uri uri, String mime) {
-        Snackbar.make(exportButton, "Fichier enregistré dans la galerie",
-                        Snackbar.LENGTH_LONG)
-                .setAction("Ouvrir", v -> {
-                    Intent intent = new Intent(Intent.ACTION_VIEW)
-                            .setDataAndType(uri, mime)
-                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    try {
-                        startActivity(intent);
-                    } catch (Exception error) {
-                        Toast.makeText(this, "Fichier : " + uri,
-                                Toast.LENGTH_LONG).show();
-                    }
-                }).show();
-    }
-
-    private void persistReadPermission(Uri uri) {
-        try {
-            getContentResolver().takePersistableUriPermission(uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        } catch (SecurityException ignored) {
-        }
-    }
-
-    private void setRetrieverDataSource(MediaMetadataRetriever retriever, Uri uri) {
-        if ("file".equals(uri.getScheme())) {
-            retriever.setDataSource(uri.getPath());
-        } else {
-            retriever.setDataSource(this, uri);
-        }
-    }
-
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private static String formatDuration(long durationMs) {
+        long totalSeconds = Math.max(0L, durationMs / 1000L);
+        return String.format(Locale.FRANCE, "%02d:%02d",
+                totalSeconds / 60L, totalSeconds % 60L);
     }
 
     private void showUnsupportedDialog() {
@@ -818,12 +739,22 @@ public final class MainActivity extends AppCompatActivity {
         if (backgroundVideo.isPlaying()) {
             backgroundVideo.pause();
         }
+        if (activeRecording != null) {
+            stopRecording();
+        }
         super.onPause();
     }
 
     @Override
     protected void onDestroy() {
-        stopCamera();
+        uiHandler.removeCallbacks(timerTick);
+        if (activeRecording != null) {
+            activeRecording.stop();
+            activeRecording = null;
+        }
+        if (cameraProvider != null) {
+            cameraProvider.unbindAll();
+        }
         cameraExecutor.shutdownNow();
         ioExecutor.shutdownNow();
         if (segmenter != null) {

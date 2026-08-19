@@ -9,11 +9,11 @@
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="0dp"
-        android:layout_height="68dp"
+        android:layout_height="64dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="18dp"
-        android:paddingEnd="14dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="12dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
@@ -42,7 +42,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/tagline"
+                android:text="Caméra détourée · décor intact"
                 android:textColor="@color/ink_secondary"
                 android:textSize="11sp" />
         </LinearLayout>
@@ -53,8 +53,8 @@
             android:layout_width="wrap_content"
             android:layout_height="40dp"
             android:minWidth="0dp"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp"
+            android:paddingStart="13dp"
+            android:paddingEnd="13dp"
             android:text="720p"
             android:textColor="@color/accent"
             android:textSize="12sp"
@@ -62,273 +62,178 @@
             app:strokeColor="@color/accent_dark" />
     </LinearLayout>
 
-    <androidx.core.widget.NestedScrollView
-        android:id="@+id/editorScroll"
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/previewCard"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:clipToPadding="false"
-        android:fillViewport="true"
-        android:overScrollMode="never"
-        android:paddingBottom="18dp"
-        app:layout_constraintBottom_toTopOf="@id/bottomBar"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="10dp"
+        android:minHeight="230dp"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:cardCornerRadius="28dp"
+        app:cardElevation="0dp"
+        app:layout_constraintBottom_toTopOf="@id/controlsCard"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/topBar">
+        app:layout_constraintTop_toBottomOf="@id/topBar"
+        app:strokeColor="#3B4658"
+        app:strokeWidth="1dp">
+
+        <FrameLayout
+            android:id="@+id/previewContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/bg_checker"
+            android:clipToOutline="true"
+            android:keepScreenOn="true">
+
+            <ImageView
+                android:id="@+id/backgroundImage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@string/background_title"
+                android:scaleType="centerCrop"
+                android:visibility="gone" />
+
+            <VideoView
+                android:id="@+id/backgroundVideo"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <ImageView
+                android:id="@+id/subjectPreview"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@string/preview_hint"
+                android:scaleType="centerCrop" />
+
+            <TextView
+                android:id="@+id/previewHint"
+                android:layout_width="270dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:lineSpacingExtra="3dp"
+                android:text="Seule ta caméra sera détourée.\nLe décor restera intact."
+                android:textColor="#F0FFFFFF"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/backgroundStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|start"
+                android:layout_margin="12dp"
+                android:background="@drawable/bg_badge"
+                android:fontFamily="sans-serif-medium"
+                android:text="DÉCOR · VERT"
+                android:textColor="@color/accent"
+                android:textSize="10sp" />
+
+            <TextView
+                android:id="@+id/recordingTimer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|center_horizontal"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_record_badge"
+                android:fontFamily="sans-serif-black"
+                android:gravity="center"
+                android:text="00:00"
+                android:textColor="@color/ink"
+                android:textSize="13sp"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/flipCameraButton"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="top|end"
+                android:layout_margin="8dp"
+                android:contentDescription="@string/switch_camera"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:backgroundTint="#B3090C11"
+                app:cornerRadius="24dp"
+                app:icon="@drawable/ic_flip"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconTint="@color/ink" />
+
+            <LinearLayout
+                android:id="@+id/processingOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#E6090C11"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="24dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-black"
+                    android:text="CRÉATION EN COURS"
+                    android:textColor="@color/ink"
+                    android:textSize="15sp" />
+
+                <ProgressBar
+                    android:id="@+id/processingProgress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="240dp"
+                    android:layout_height="9dp"
+                    android:layout_marginTop="16dp"
+                    android:max="100"
+                    android:progress="0"
+                    android:progressTint="@color/accent" />
+
+                <TextView
+                    android:id="@+id/processingText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center"
+                    android:text="@string/processing"
+                    android:textColor="@color/ink_secondary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+        </FrameLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/controlsCard"
+        android:layout_width="0dp"
+        android:layout_height="188dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="8dp"
+        app:cardBackgroundColor="@color/surface"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="0dp"
+        app:layout_constraintBottom_toTopOf="@id/recordBar"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:strokeColor="@color/surface_high"
+        app:strokeWidth="1dp">
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/previewCard"
-                android:layout_width="match_parent"
-                android:layout_height="420dp"
-                android:layout_marginStart="14dp"
-                android:layout_marginEnd="14dp"
-                android:layout_marginBottom="14dp"
-                app:cardBackgroundColor="@android:color/transparent"
-                app:cardCornerRadius="24dp"
-                app:cardElevation="0dp"
-                app:strokeColor="#3B4658"
-                app:strokeWidth="1dp">
-
-                <FrameLayout
-                    android:id="@+id/previewContainer"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:background="@drawable/bg_checker"
-                    android:clipToOutline="true">
-
-                    <ImageView
-                        android:id="@+id/backgroundImage"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:contentDescription="@string/background_title"
-                        android:scaleType="centerCrop"
-                        android:visibility="gone" />
-
-                    <VideoView
-                        android:id="@+id/backgroundVideo"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:visibility="gone" />
-
-                    <ImageView
-                        android:id="@+id/subjectPreview"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:contentDescription="@string/preview_hint"
-                        android:scaleType="centerCrop" />
-
-                    <TextView
-                        android:id="@+id/previewHint"
-                        android:layout_width="260dp"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="center"
-                        android:gravity="center"
-                        android:lineSpacingExtra="3dp"
-                        android:text="@string/preview_hint"
-                        android:textColor="#E6FFFFFF"
-                        android:textSize="15sp" />
-
-                    <LinearLayout
-                        android:id="@+id/liveBadge"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="top|start"
-                        android:layout_margin="14dp"
-                        android:background="@drawable/bg_badge"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <View
-                            android:layout_width="7dp"
-                            android:layout_height="7dp"
-                            android:background="@drawable/bg_circle_accent" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="7dp"
-                            android:fontFamily="sans-serif-medium"
-                            android:text="@string/ai_live"
-                            android:textColor="@color/accent"
-                            android:textSize="10sp" />
-                    </LinearLayout>
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/flipCameraButton"
-                        style="@style/Widget.MaterialComponents.Button.TextButton"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:layout_gravity="top|end"
-                        android:layout_margin="10dp"
-                        android:contentDescription="@string/switch_camera"
-                        android:insetTop="0dp"
-                        android:insetBottom="0dp"
-                        app:backgroundTint="#99090C11"
-                        app:cornerRadius="24dp"
-                        app:icon="@drawable/ic_flip"
-                        app:iconGravity="textStart"
-                        app:iconPadding="0dp"
-                        app:iconTint="@color/ink" />
-
-                    <LinearLayout
-                        android:id="@+id/processingOverlay"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:background="#AA090C11"
-                        android:gravity="center"
-                        android:orientation="vertical"
-                        android:visibility="gone">
-
-                        <ProgressBar
-                            android:id="@+id/processingProgress"
-                            style="?android:attr/progressBarStyleHorizontal"
-                            android:layout_width="220dp"
-                            android:layout_height="8dp"
-                            android:max="100"
-                            android:progress="0"
-                            android:progressTint="@color/accent" />
-
-                        <TextView
-                            android:id="@+id/processingText"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="14dp"
-                            android:text="@string/processing"
-                            android:textColor="@color/ink"
-                            android:textSize="14sp" />
-                    </LinearLayout>
-                </FrameLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.button.MaterialButtonToggleGroup
-                android:id="@+id/modeGroup"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginStart="16dp"
-                android:layout_marginEnd="16dp"
-                android:layout_marginBottom="16dp"
-                app:checkedButton="@id/modeCamera"
-                app:selectionRequired="true"
-                app:singleSelection="true">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/modeCamera"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="1"
-                    android:text="@string/camera" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/modeVideo"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="1"
-                    android:text="@string/video" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/modePhoto"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="1"
-                    android:text="@string/photo" />
-            </com.google.android.material.button.MaterialButtonToggleGroup>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="18dp"
-                android:fontFamily="sans-serif-medium"
-                android:text="@string/background_title"
-                android:textColor="@color/ink"
-                android:textSize="15sp" />
-
-            <HorizontalScrollView
-                android:layout_width="match_parent"
-                android:layout_height="96dp"
-                android:layout_marginTop="8dp"
-                android:clipToPadding="false"
-                android:overScrollMode="never"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:scrollbars="none">
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="match_parent"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/bgTransparent"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="112dp"
-                        android:layout_height="64dp"
-                        android:layout_marginEnd="8dp"
-                        android:text="@string/transparent"
-                        android:textColor="@color/accent"
-                        app:cornerRadius="18dp"
-                        app:strokeColor="@color/accent" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/bgGreen"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="82dp"
-                        android:layout_height="64dp"
-                        android:layout_marginEnd="8dp"
-                        android:text="@string/green"
-                        app:cornerRadius="18dp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/bgBlack"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="82dp"
-                        android:layout_height="64dp"
-                        android:layout_marginEnd="8dp"
-                        android:text="@string/black"
-                        app:cornerRadius="18dp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/bgWhite"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="82dp"
-                        android:layout_height="64dp"
-                        android:layout_marginEnd="8dp"
-                        android:text="@string/white"
-                        app:cornerRadius="18dp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/bgImage"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="92dp"
-                        android:layout_height="64dp"
-                        android:layout_marginEnd="8dp"
-                        android:text="@string/image"
-                        app:cornerRadius="18dp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/bgVideo"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="92dp"
-                        android:layout_height="64dp"
-                        android:layout_marginEnd="8dp"
-                        android:text="@string/video"
-                        app:cornerRadius="18dp" />
-                </LinearLayout>
-            </HorizontalScrollView>
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:paddingStart="12dp"
+            android:paddingTop="11dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="10dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="18dp"
-                android:layout_marginTop="4dp"
-                android:layout_marginEnd="18dp"
+                android:layout_height="40dp"
+                android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <LinearLayout
@@ -340,114 +245,174 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/edge"
-                        android:textColor="@color/ink_secondary"
+                        android:fontFamily="sans-serif-black"
+                        android:text="1 · CHOISIS TON DÉCOR"
+                        android:textColor="@color/ink"
                         android:textSize="13sp" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/thresholdSlider"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:value="0.58"
-                        android:valueFrom="0.2"
-                        android:valueTo="0.85"
-                        app:haloColor="#3325E6A2"
-                        app:thumbColor="@color/accent"
-                        app:trackColorActive="@color/accent"
-                        app:trackColorInactive="@color/surface_high" />
-                </LinearLayout>
-
-                <Space
-                    android:layout_width="12dp"
-                    android:layout_height="1dp" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/softness"
+                        android:text="Il ne sera jamais détouré"
                         android:textColor="@color/ink_secondary"
-                        android:textSize="13sp" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/softnessSlider"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:value="0.16"
-                        android:valueFrom="0.02"
-                        android:valueTo="0.35"
-                        app:haloColor="#3331C7FF"
-                        app:thumbColor="@color/cyan"
-                        app:trackColorActive="@color/cyan"
-                        app:trackColorInactive="@color/surface_high" />
+                        android:textSize="11sp" />
                 </LinearLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/maskModeButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="Contour · Naturel"
+                    android:textColor="@color/cyan"
+                    android:textSize="10sp"
+                    app:cornerRadius="13dp"
+                    app:strokeColor="@color/cyan" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="58dp"
+                android:layout_marginTop="7dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/bgImage"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginEnd="5dp"
+                    android:layout_weight="1"
+                    android:text="Choisir une image"
+                    android:textColor="@color/ink"
+                    android:textSize="12sp"
+                    app:cornerRadius="17dp"
+                    app:icon="@drawable/ic_import"
+                    app:iconTint="@color/accent"
+                    app:strokeColor="@color/surface_high" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/bgVideo"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="5dp"
+                    android:layout_weight="1"
+                    android:text="Choisir une vidéo"
+                    android:textColor="@color/ink"
+                    android:textSize="12sp"
+                    app:cornerRadius="17dp"
+                    app:icon="@drawable/ic_import"
+                    app:iconTint="@color/cyan"
+                    app:strokeColor="@color/surface_high" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="43dp"
+                android:layout_marginTop="7dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/bgTransparent"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginEnd="3dp"
+                    android:layout_weight="1.35"
+                    android:minWidth="0dp"
+                    android:paddingStart="3dp"
+                    android:paddingEnd="3dp"
+                    android:text="Sans fond"
+                    android:textSize="10sp"
+                    app:cornerRadius="14dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/bgGreen"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="3dp"
+                    android:layout_marginEnd="3dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:paddingStart="3dp"
+                    android:paddingEnd="3dp"
+                    android:text="Vert"
+                    android:textSize="10sp"
+                    app:cornerRadius="14dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/bgBlack"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="3dp"
+                    android:layout_marginEnd="3dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:paddingStart="3dp"
+                    android:paddingEnd="3dp"
+                    android:text="Noir"
+                    android:textSize="10sp"
+                    app:cornerRadius="14dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/bgWhite"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="3dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:paddingStart="3dp"
+                    android:paddingEnd="3dp"
+                    android:text="Blanc"
+                    android:textSize="10sp"
+                    app:cornerRadius="14dp" />
             </LinearLayout>
         </LinearLayout>
-    </androidx.core.widget.NestedScrollView>
+    </com.google.android.material.card.MaterialCardView>
 
     <LinearLayout
-        android:id="@+id/bottomBar"
+        android:id="@+id/recordBar"
         android:layout_width="0dp"
-        android:layout_height="94dp"
+        android:layout_height="98dp"
         android:background="@color/surface"
-        android:elevation="14dp"
+        android:elevation="16dp"
         android:gravity="center"
-        android:orientation="horizontal"
-        android:paddingStart="14dp"
-        android:paddingTop="10dp"
-        android:paddingEnd="14dp"
+        android:orientation="vertical"
+        android:paddingStart="18dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="18dp"
         android:paddingBottom="10dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/importButton"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="0dp"
-            android:layout_height="58dp"
-            android:layout_weight="1"
-            android:text="@string/importer"
-            android:textColor="@color/ink"
-            app:cornerRadius="18dp"
-            app:icon="@drawable/ic_import"
-            app:iconTint="@color/ink"
-            app:strokeColor="@color/surface_high" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:text="2 · FILME-TOI — sauvegarde automatique"
+            android:textColor="@color/ink_secondary"
+            android:textSize="10sp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/recordButton"
-            android:layout_width="70dp"
-            android:layout_height="70dp"
-            android:layout_marginStart="12dp"
-            android:layout_marginEnd="12dp"
-            android:background="@drawable/bg_circle_accent"
+            android:layout_width="match_parent"
+            android:layout_height="62dp"
+            android:layout_marginTop="4dp"
             android:contentDescription="@string/record"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:minWidth="0dp"
-            android:padding="0dp"
-            android:text="●"
-            android:textColor="@color/background"
-            android:textSize="26sp"
-            app:backgroundTint="@android:color/transparent"
-            app:cornerRadius="35dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/exportButton"
-            android:layout_width="0dp"
-            android:layout_height="58dp"
-            android:layout_weight="1"
-            android:text="@string/exporter"
-            android:textColor="@color/background"
-            app:backgroundTint="@color/accent"
-            app:cornerRadius="18dp"
-            app:icon="@drawable/ic_export"
-            app:iconTint="@color/background" />
+            android:fontFamily="sans-serif-black"
+            android:text="●  ENREGISTRER"
+            android:textColor="@color/ink"
+            android:textSize="17sp"
+            app:backgroundTint="@color/danger"
+            app:cornerRadius="22dp" />
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

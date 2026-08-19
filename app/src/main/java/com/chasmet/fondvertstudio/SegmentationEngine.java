@@ -50,15 +50,17 @@ public final class SegmentationEngine implements AutoCloseable {
     private final ExecutorService resultExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean streamBusy = new AtomicBoolean(false);
-    private volatile float threshold = 0.58f;
-    private volatile float softness = 0.16f;
+    private volatile float threshold = 0.46f;
+    private volatile float softness = 0.22f;
 
     public SegmentationEngine(Context context) {
         SelfieSegmenterOptions streamOptions = new SelfieSegmenterOptions.Builder()
                 .setDetectorMode(SelfieSegmenterOptions.STREAM_MODE)
+                .enableRawSizeMask()
                 .build();
         SelfieSegmenterOptions stillOptions = new SelfieSegmenterOptions.Builder()
                 .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+                .enableRawSizeMask()
                 .build();
         streamSegmenter = Segmentation.getClient(streamOptions);
         stillSegmenter = Segmentation.getClient(stillOptions);
@@ -112,7 +114,7 @@ public final class SegmentationEngine implements AutoCloseable {
     public Result processStillBlocking(Bitmap bitmap, float localThreshold,
                                        float localSoftness) throws Exception {
         SegmentationMask mask = Tasks.await(
-                stillSegmenter.process(InputImage.fromBitmap(bitmap, 0)),
+                streamSegmenter.process(InputImage.fromBitmap(bitmap, 0)),
                 60, TimeUnit.SECONDS);
         return makeResult(bitmap, mask, localThreshold, localSoftness);
     }

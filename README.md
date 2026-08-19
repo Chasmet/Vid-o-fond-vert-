@@ -1,15 +1,15 @@
 # Fond Vert Studio
 
-Application Android native pour détourer une personne en direct, remplacer son arrière-plan et exporter le résultat sans serveur payant.
+Application Android native pour filmer une personne détourée devant un décor image ou vidéo, sans serveur payant.
 
 ## Fonctions
 
 - caméra avant ou arrière avec détourage IA en direct ;
-- import d’une vidéo ou d’une photo ;
-- aperçu transparent sur damier ;
-- fonds vert pur, noir, blanc, image ou vidéo ;
-- réglages du seuil et de la douceur des contours ;
-- enregistrement caméra avec audio ;
+- les images et vidéos importées servent exclusivement de décor et ne sont jamais détourées ;
+- aperçu du montage final en direct ;
+- décors sans fond, vert pur, noir, blanc, image ou vidéo ;
+- trois profils de contour : naturel, cheveux et net ;
+- gros bouton d’enregistrement avec chronomètre et audio ;
 - export MP4 H.264 en 720p ou 1080p ;
 - export PNG réellement transparent ;
 - traitement local : aucun compte, aucune clé API et aucun envoi vers un serveur.
@@ -19,13 +19,19 @@ Application Android native pour détourer une personne en direct, remplacer son 
 - Java 17 ;
 - minSdk 21, targetSdk 34 et compileSdk 34 ;
 - CameraX pour la caméra et l’enregistrement ;
-- ML Kit Selfie Segmentation en mode flux ;
+- ML Kit Selfie Segmentation en mode flux, masque brut redimensionné en bilinéaire et contours lissés ;
 - MediaCodec et MediaMuxer pour l’encodage vidéo local ;
 - WorkManager pour les exports longs.
 
 ML Kit nécessite Android 6.0 ou plus récent pour le détourage. L’application reste installable à partir d’Android 5.0 et affiche une information claire sur Android 5.x.
 
-## Transparence vidéo
+## Fonctionnement
+
+1. Choisir une image ou une vidéo de décor (elle reste intacte).
+2. Se placer devant la caméra : seul le flux caméra est détouré.
+3. Appuyer sur **ENREGISTRER**, puis **ARRÊTER**. Le montage final est automatiquement ajouté à la galerie.
+
+## Sans fond dans une vidéo
 
 Le format MP4/H.264 Android ne conserve pas de canal alpha. Un projet vidéo choisi comme « transparent » est donc exporté sur un vert pur `#00FF00`, prêt pour la suppression chromatique dans CapCut ou un autre éditeur. Les photos PNG conservent une vraie transparence.
 
