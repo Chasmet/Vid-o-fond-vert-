@@ -50,8 +50,9 @@ public final class SegmentationEngine implements AutoCloseable {
     private final ExecutorService resultExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean streamBusy = new AtomicBoolean(false);
-    private volatile float threshold = 0.46f;
-    private volatile float softness = 0.22f;
+    private static final int INFERENCE_MAX_DIMENSION = 768;
+    private volatile float threshold = 0.52f;
+    private volatile float softness = 0.08f;
 
     public SegmentationEngine(Context context) {
         SelfieSegmenterOptions streamOptions = new SelfieSegmenterOptions.Builder()
@@ -71,12 +72,25 @@ public final class SegmentationEngine implements AutoCloseable {
         softness = newSoftness;
     }
 
+    public boolean isStreamBusy() {
+        return streamBusy.get();
+    }
+
     public void processStream(Bitmap bitmap, @NonNull Callback callback) {
         if (!streamBusy.compareAndSet(false, true)) {
             bitmap.recycle();
             return;
         }
-        InputImage input = InputImage.fromBitmap(bitmap, 0);
+        final Bitmap inferenceBitmap;
+        try {
+            inferenceBitmap = BitmapUtils.scaleDown(bitmap, INFERENCE_MAX_DIMENSION);
+        } catch (Exception error) {
+            streamBusy.set(false);
+            bitmap.recycle();
+            mainHandler.post(() -> callback.onError(error));
+            return;
+        }
+        InputImage input = InputImage.fromBitmap(inferenceBitmap, 0);
         streamSegmenter.process(input)
                 .addOnSuccessListener(resultExecutor, mask -> {
                     try {
@@ -86,11 +100,17 @@ public final class SegmentationEngine implements AutoCloseable {
                         bitmap.recycle();
                         mainHandler.post(() -> callback.onError(error));
                     } finally {
+                        if (inferenceBitmap != bitmap && !inferenceBitmap.isRecycled()) {
+                            inferenceBitmap.recycle();
+                        }
                         streamBusy.set(false);
                     }
                 })
                 .addOnFailureListener(resultExecutor, error -> {
                     streamBusy.set(false);
+                    if (inferenceBitmap != bitmap && !inferenceBitmap.isRecycled()) {
+                        inferenceBitmap.recycle();
+                    }
                     bitmap.recycle();
                     mainHandler.post(() -> callback.onError(error));
                 });
@@ -98,25 +118,40 @@ public final class SegmentationEngine implements AutoCloseable {
 
     public void processStill(Bitmap bitmap, @NonNull Callback callback) {
         resultExecutor.execute(() -> {
+            Bitmap inferenceBitmap = null;
             try {
+                inferenceBitmap = BitmapUtils.scaleDown(bitmap, INFERENCE_MAX_DIMENSION);
                 SegmentationMask mask = Tasks.await(
-                        stillSegmenter.process(InputImage.fromBitmap(bitmap, 0)),
+                        stillSegmenter.process(InputImage.fromBitmap(inferenceBitmap, 0)),
                         60, TimeUnit.SECONDS);
                 Result result = makeResult(bitmap, mask, threshold, softness);
                 mainHandler.post(() -> callback.onResult(result));
             } catch (Exception error) {
                 bitmap.recycle();
                 mainHandler.post(() -> callback.onError(error));
+            } finally {
+                if (inferenceBitmap != null && inferenceBitmap != bitmap
+                        && !inferenceBitmap.isRecycled()) {
+                    inferenceBitmap.recycle();
+                }
             }
         });
     }
 
     public Result processStillBlocking(Bitmap bitmap, float localThreshold,
                                        float localSoftness) throws Exception {
-        SegmentationMask mask = Tasks.await(
-                streamSegmenter.process(InputImage.fromBitmap(bitmap, 0)),
-                60, TimeUnit.SECONDS);
-        return makeResult(bitmap, mask, localThreshold, localSoftness);
+        Bitmap inferenceBitmap = BitmapUtils.scaleDown(
+                bitmap, INFERENCE_MAX_DIMENSION);
+        try {
+            SegmentationMask mask = Tasks.await(
+                    streamSegmenter.process(InputImage.fromBitmap(inferenceBitmap, 0)),
+                    60, TimeUnit.SECONDS);
+            return makeResult(bitmap, mask, localThreshold, localSoftness);
+        } finally {
+            if (inferenceBitmap != bitmap && !inferenceBitmap.isRecycled()) {
+                inferenceBitmap.recycle();
+            }
+        }
     }
 
     private static Result makeResult(Bitmap bitmap, SegmentationMask segmentationMask,

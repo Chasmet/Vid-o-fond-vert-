@@ -79,11 +79,11 @@ public final class MainActivity extends AppCompatActivity {
     private MaterialButton[] backgroundButtons;
 
     private final BackgroundSpec backgroundSpec = new BackgroundSpec();
-    private int quality = 720;
+    private int quality = 1080;
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
     private int maskPreset;
-    private float threshold = 0.46f;
-    private float softness = 0.22f;
+    private float threshold = 0.52f;
+    private float softness = 0.08f;
     private ProcessCameraProvider cameraProvider;
     private VideoCapture<Recorder> videoCapture;
     private Recording activeRecording;
@@ -232,9 +232,9 @@ public final class MainActivity extends AppCompatActivity {
                 return;
             }
             quality = quality == 720 ? 1080 : 720;
-            qualityButton.setText(quality + "p");
+            qualityButton.setText("CAM " + quality + "p");
             startCamera();
-            Toast.makeText(this, "Enregistrement et export en " + quality + "p",
+            Toast.makeText(this, "Caméra et export en " + quality + "p",
                     Toast.LENGTH_SHORT).show();
         });
         maskModeButton.setOnClickListener(v -> selectNextMaskPreset());
@@ -254,17 +254,17 @@ public final class MainActivity extends AppCompatActivity {
     private void selectNextMaskPreset() {
         maskPreset = (maskPreset + 1) % 3;
         if (maskPreset == 1) {
-            threshold = 0.38f;
-            softness = 0.28f;
+            threshold = 0.43f;
+            softness = 0.16f;
             maskModeButton.setText("Contour · Cheveux");
         } else if (maskPreset == 2) {
-            threshold = 0.55f;
-            softness = 0.15f;
-            maskModeButton.setText("Contour · Net");
+            threshold = 0.48f;
+            softness = 0.13f;
+            maskModeButton.setText("Contour · Doux");
         } else {
-            threshold = 0.46f;
-            softness = 0.22f;
-            maskModeButton.setText("Contour · Naturel");
+            threshold = 0.52f;
+            softness = 0.08f;
+            maskModeButton.setText("Contour · HD net");
         }
         if (segmenter != null) {
             segmenter.setEdgeSettings(threshold, softness);
@@ -320,13 +320,6 @@ public final class MainActivity extends AppCompatActivity {
             return;
         }
         cameraProvider.unbindAll();
-        ImageAnalysis analysis = new ImageAnalysis.Builder()
-                .setTargetResolution(new Size(720, 1280))
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                .build();
-        analysis.setAnalyzer(cameraExecutor, this::analyzeCameraFrame);
-
         Quality preferred = quality == 1080 ? Quality.FHD : Quality.HD;
         QualitySelector selector = QualitySelector.from(preferred,
                 FallbackStrategy.lowerQualityOrHigherThan(Quality.SD));
@@ -336,13 +329,42 @@ public final class MainActivity extends AppCompatActivity {
                 .requireLensFacing(lensFacing)
                 .build();
         try {
+            ImageAnalysis analysis = createImageAnalysis(quality == 1080
+                    ? new Size(1080, 1920) : new Size(720, 1280));
             cameraProvider.bindToLifecycle(this, cameraSelector, analysis, videoCapture);
         } catch (Exception error) {
-            showError("Cette caméra ne permet pas ce mode vidéo");
+            if (quality == 1080) {
+                try {
+                    cameraProvider.unbindAll();
+                    ImageAnalysis analysis = createImageAnalysis(new Size(720, 1280));
+                    cameraProvider.bindToLifecycle(this, cameraSelector, analysis, videoCapture);
+                    Toast.makeText(this,
+                            "Vidéo 1080p · aperçu optimisé à 720p sur cette caméra",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                } catch (Exception ignored) {
+                    // The user receives the single clear error below.
+                }
+            }
+            showError("Cette caméra ne permet pas le mode vidéo sélectionné");
         }
     }
 
+    private ImageAnalysis createImageAnalysis(Size targetSize) {
+        ImageAnalysis analysis = new ImageAnalysis.Builder()
+                .setTargetResolution(targetSize)
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                .build();
+        analysis.setAnalyzer(cameraExecutor, this::analyzeCameraFrame);
+        return analysis;
+    }
+
     private void analyzeCameraFrame(@NonNull ImageProxy imageProxy) {
+        if (segmenter == null || segmenter.isStreamBusy()) {
+            imageProxy.close();
+            return;
+        }
         Bitmap bitmap;
         int rotation = imageProxy.getImageInfo().getRotationDegrees();
         try {

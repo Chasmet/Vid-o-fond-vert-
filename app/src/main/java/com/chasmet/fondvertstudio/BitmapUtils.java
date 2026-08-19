@@ -135,8 +135,9 @@ public final class BitmapUtils {
                                    int maskHeight, float threshold, float softness) {
         int width = source.getWidth();
         int height = source.getHeight();
-        int[] pixels = new int[width * height];
-        source.getPixels(pixels, 0, width, 0, 0, width, height);
+        int[] sourcePixels = new int[width * height];
+        int[] outputPixels = new int[width * height];
+        source.getPixels(sourcePixels, 0, width, 0, 0, width, height);
 
         float[] refinedMask = refineMask(mask, maskWidth, maskHeight);
         float edge0 = clamp(threshold - softness, 0f, 1f);
@@ -160,13 +161,37 @@ public final class BitmapUtils {
                         + refinedMask[y1 * maskWidth + x1] * fx;
                 float confidence = top * (1f - fy) + bottom * fy;
                 float alpha = smoothStep(edge0, edge1, confidence);
-                int original = pixels[row + x];
+                int original = sourcePixels[row + x];
                 int originalAlpha = Color.alpha(original);
                 int finalAlpha = Math.round(originalAlpha * alpha);
-                pixels[row + x] = (original & 0x00FFFFFF) | (finalAlpha << 24);
+                int detailed = original;
+                if (confidence > 0.78f && x > 0 && x < width - 1
+                        && y > 0 && y < height - 1) {
+                    detailed = sharpenPixel(sourcePixels, width, x, y, original);
+                }
+                outputPixels[row + x] = (detailed & 0x00FFFFFF) | (finalAlpha << 24);
             }
         }
-        return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+        return Bitmap.createBitmap(outputPixels, width, height, Bitmap.Config.ARGB_8888);
+    }
+
+    private static int sharpenPixel(int[] pixels, int width, int x, int y, int center) {
+        int left = pixels[y * width + x - 1];
+        int right = pixels[y * width + x + 1];
+        int top = pixels[(y - 1) * width + x];
+        int bottom = pixels[(y + 1) * width + x];
+        int red = sharpenChannel(Color.red(center), Color.red(left), Color.red(right),
+                Color.red(top), Color.red(bottom));
+        int green = sharpenChannel(Color.green(center), Color.green(left), Color.green(right),
+                Color.green(top), Color.green(bottom));
+        int blue = sharpenChannel(Color.blue(center), Color.blue(left), Color.blue(right),
+                Color.blue(top), Color.blue(bottom));
+        return Color.argb(Color.alpha(center), red, green, blue);
+    }
+
+    private static int sharpenChannel(int center, int left, int right, int top, int bottom) {
+        float detail = 4f * center - left - right - top - bottom;
+        return clampInt(Math.round(center + 0.16f * detail), 0, 255);
     }
 
     private static float[] refineMask(float[] source, int width, int height) {
@@ -192,7 +217,27 @@ public final class BitmapUtils {
                         + horizontal[nextRow + x]) * 0.25f;
             }
         }
+        for (int index = 0; index < output.length; index++) {
+            float original = source[index];
+            if (original > 0.04f && original < 0.96f) {
+                output[index] = clamp(original + 0.85f * (original - output[index]),
+                        0f, 1f);
+            } else {
+                output[index] = original;
+            }
+        }
         return output;
+    }
+
+    public static Bitmap scaleDown(Bitmap source, int maxDimension) {
+        int largest = Math.max(source.getWidth(), source.getHeight());
+        if (largest <= maxDimension) {
+            return source;
+        }
+        float scale = (float) maxDimension / largest;
+        int width = Math.max(2, Math.round(source.getWidth() * scale));
+        int height = Math.max(2, Math.round(source.getHeight() * scale));
+        return Bitmap.createScaledBitmap(source, width, height, true);
     }
 
     public static Bitmap centerCrop(Bitmap source, int targetWidth, int targetHeight) {
@@ -220,15 +265,23 @@ public final class BitmapUtils {
         Bitmap output = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(output);
         if (background != null) {
-            Bitmap cropped = centerCrop(background, targetWidth, targetHeight);
-            canvas.drawBitmap(cropped, 0f, 0f, null);
-            cropped.recycle();
+            if (background.getWidth() == targetWidth && background.getHeight() == targetHeight) {
+                canvas.drawBitmap(background, 0f, 0f, null);
+            } else {
+                Bitmap cropped = centerCrop(background, targetWidth, targetHeight);
+                canvas.drawBitmap(cropped, 0f, 0f, null);
+                cropped.recycle();
+            }
         } else {
             canvas.drawColor(color);
         }
-        Bitmap subject = centerCrop(cutout, targetWidth, targetHeight);
-        canvas.drawBitmap(subject, 0f, 0f, null);
-        subject.recycle();
+        if (cutout.getWidth() == targetWidth && cutout.getHeight() == targetHeight) {
+            canvas.drawBitmap(cutout, 0f, 0f, null);
+        } else {
+            Bitmap subject = centerCrop(cutout, targetWidth, targetHeight);
+            canvas.drawBitmap(subject, 0f, 0f, null);
+            subject.recycle();
+        }
         return output;
     }
 
@@ -273,6 +326,10 @@ public final class BitmapUtils {
     }
 
     private static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static int clampInt(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
 }

@@ -19,6 +19,7 @@ final class H264FrameEncoder implements AutoCloseable {
     private final MediaCodec codec;
     private final MediaMuxer muxer;
     private final MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+    private final int[] pixelBuffer;
     private int trackIndex = -1;
     private boolean muxerStarted;
     private boolean finished;
@@ -26,10 +27,11 @@ final class H264FrameEncoder implements AutoCloseable {
     H264FrameEncoder(File output, int width, int height, int frameRate) throws IOException {
         this.width = width;
         this.height = height;
+        pixelBuffer = new int[width * height];
         MediaFormat format = MediaFormat.createVideoFormat(MIME, width, height);
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible);
-        int bitrate = Math.max(2_000_000, Math.min(14_000_000, width * height * 7));
+        int bitrate = Math.max(4_000_000, Math.min(22_000_000, width * height * 9));
         format.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
         format.setInteger(MediaFormat.KEY_FRAME_RATE, frameRate);
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
@@ -136,8 +138,7 @@ final class H264FrameEncoder implements AutoCloseable {
     }
 
     private void writeBitmapToImage(Bitmap bitmap, Image image) {
-        int[] argb = new int[width * height];
-        bitmap.getPixels(argb, 0, width, 0, 0, width, height);
+        bitmap.getPixels(pixelBuffer, 0, width, 0, 0, width, height);
         Image.Plane[] planes = image.getPlanes();
         ByteBuffer yBuffer = planes[0].getBuffer();
         ByteBuffer uBuffer = planes[1].getBuffer();
@@ -151,7 +152,7 @@ final class H264FrameEncoder implements AutoCloseable {
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                int color = argb[y * width + x];
+                int color = pixelBuffer[y * width + x];
                 int r = Color.red(color);
                 int g = Color.green(color);
                 int b = Color.blue(color);
@@ -171,14 +172,13 @@ final class H264FrameEncoder implements AutoCloseable {
 
     private void writeI420(Bitmap bitmap, ByteBuffer buffer) {
         buffer.clear();
-        int[] argb = new int[width * height];
-        bitmap.getPixels(argb, 0, width, 0, 0, width, height);
+        bitmap.getPixels(pixelBuffer, 0, width, 0, 0, width, height);
         int frameSize = width * height;
         int uOffset = frameSize;
         int vOffset = frameSize + frameSize / 4;
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                int color = argb[y * width + x];
+                int color = pixelBuffer[y * width + x];
                 int r = Color.red(color);
                 int g = Color.green(color);
                 int b = Color.blue(color);

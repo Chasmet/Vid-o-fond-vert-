@@ -55,9 +55,9 @@ public final class VideoExportWorker extends Worker {
         if (backgroundType == BackgroundSpec.Type.TRANSPARENT) {
             backgroundColor = Color.rgb(0, 255, 0);
         }
-        float threshold = getInputData().getFloat(KEY_THRESHOLD, 0.46f);
-        float softness = getInputData().getFloat(KEY_SOFTNESS, 0.22f);
-        int quality = getInputData().getInt(KEY_QUALITY, 720);
+        float threshold = getInputData().getFloat(KEY_THRESHOLD, 0.52f);
+        float softness = getInputData().getFloat(KEY_SOFTNESS, 0.08f);
+        int quality = getInputData().getInt(KEY_QUALITY, 1080);
         boolean mirrorSource = getInputData().getBoolean(KEY_MIRROR_SOURCE, false);
 
         Context context = getApplicationContext();
@@ -97,7 +97,7 @@ public final class VideoExportWorker extends Worker {
                     maxWidth, maxHeight);
             int width = outputSize[0];
             int height = outputSize[1];
-            int frameRate = 24;
+            int frameRate = 30;
             int frameCount = Math.max(1, (int) Math.ceil(durationMs * frameRate / 1000d));
             long durationUs = durationMs * 1000L;
 

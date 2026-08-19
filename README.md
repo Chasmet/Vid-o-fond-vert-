@@ -4,13 +4,13 @@ Application Android native pour filmer une personne détourée devant un décor 
 
 ## Fonctions
 
-- caméra avant ou arrière avec détourage IA en direct ;
+- caméra avant ou arrière en Full HD par défaut avec détourage IA en direct ;
 - les images et vidéos importées servent exclusivement de décor et ne sont jamais détourées ;
 - aperçu du montage final en direct ;
 - décors sans fond, vert pur, noir, blanc, image ou vidéo ;
-- trois profils de contour : naturel, cheveux et net ;
+- trois profils de contour : HD net, cheveux et doux ;
 - gros bouton d’enregistrement avec chronomètre et audio ;
-- export MP4 H.264 en 720p ou 1080p ;
+- export MP4 H.264 jusqu’en 1080p à 30 images/s et haut débit ;
 - export PNG réellement transparent ;
 - traitement local : aucun compte, aucune clé API et aucun envoi vers un serveur.
 
@@ -19,7 +19,8 @@ Application Android native pour filmer une personne détourée devant un décor 
 - Java 17 ;
 - minSdk 21, targetSdk 34 et compileSdk 34 ;
 - CameraX pour la caméra et l’enregistrement ;
-- ML Kit Selfie Segmentation en mode flux, masque brut redimensionné en bilinéaire et contours lissés ;
+- ML Kit Selfie Segmentation en mode flux, inférence optimisée et pixels Full HD conservés ;
+- masque brut redimensionné en bilinéaire, bords renforcés et détails caméra accentués ;
 - MediaCodec et MediaMuxer pour l’encodage vidéo local ;
 - WorkManager pour les exports longs.
 
