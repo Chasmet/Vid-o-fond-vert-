@@ -36,7 +36,7 @@ jobs:
       - name: Autoriser Gradle
         run: chmod +x gradlew
 
-      - name: Compiler et tester l'APK avec RVM ncnn
+      - name: Compiler et tester l'APK RVM foreground
         run: ./gradlew --no-daemon clean assembleDebug lintDebug
 
       - name: Vérifier RVM et le moteur natif
@@ -48,12 +48,12 @@ jobs:
           echo "RVM MobileNetV3 + ncnn présents dans l'APK"
 
       - name: Nommer l'APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.8.0-RVM-ncnn.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.8.1-RVM-Foreground-Fusion.apk
 
       - name: Publier l'APK
         uses: actions/upload-artifact@v4
         with:
           name: Fond-Vert-Studio-APK
-          path: Fond-Vert-Studio-v1.8.0-RVM-ncnn.apk
+          path: Fond-Vert-Studio-v1.8.1-RVM-Foreground-Fusion.apk
           if-no-files-found: error
           retention-days: 30
