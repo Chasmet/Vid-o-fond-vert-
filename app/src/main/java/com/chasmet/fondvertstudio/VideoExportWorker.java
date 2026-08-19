@@ -5,6 +5,7 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.media.MediaMetadataRetriever;
 import android.net.Uri;
+import android.os.Build;
 
 import androidx.annotation.NonNull;
 import androidx.work.Data;
@@ -13,6 +14,8 @@ import androidx.work.WorkerParameters;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 public final class VideoExportWorker extends Worker {
@@ -97,7 +100,14 @@ public final class VideoExportWorker extends Worker {
                     maxWidth, maxHeight);
             int width = outputSize[0];
             int height = outputSize[1];
-            int frameRate = 30;
+            int sourceFrameCount = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                    ? readInt(sourceRetriever,
+                    MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT, 0)
+                    : 0;
+            double detectedFrameRate = sourceFrameCount > 0
+                    ? sourceFrameCount * 1000d / durationMs : 30d;
+            int frameRate = Math.max(15, Math.min(30,
+                    (int) Math.round(detectedFrameRate)));
             int frameCount = Math.max(1, (int) Math.ceil(durationMs * frameRate / 1000d));
             long durationUs = durationMs * 1000L;
 
@@ -106,44 +116,19 @@ public final class VideoExportWorker extends Worker {
                     backgroundUri, backgroundColor, Math.max(width, height));
             encoder = new H264FrameEncoder(videoOnly, width, height, frameRate);
 
-            for (int frameIndex = 0; frameIndex < frameCount; frameIndex++) {
-                if (isStopped()) {
-                    throw new IOException("Export annulé");
-                }
-                long timeUs = frameIndex * 1_000_000L / frameRate;
-                Bitmap frame = sourceRetriever.getFrameAtTime(
-                        Math.min(timeUs, durationUs - 1),
-                        MediaMetadataRetriever.OPTION_CLOSEST);
-                if (frame == null) {
-                    continue;
-                }
-                frame = orientFrame(frame, rotation, metadataWidth, metadataHeight);
-                if (mirrorSource) {
-                    frame = BitmapUtils.rotateAndMirror(frame, 0, true);
-                }
-                Bitmap prepared = BitmapUtils.centerCrop(frame, width, height);
-                frame.recycle();
-
-                SegmentationEngine.Result segmented = segmenter.processStillBlocking(
-                        prepared, threshold, softness);
-                Bitmap background = backgroundProvider.frameAt(timeUs, width, height);
-                Bitmap composite = BitmapUtils.composite(segmented.cutout, background,
-                        backgroundProvider.getColor(), width, height);
-                encoder.encode(composite, timeUs);
-
-                composite.recycle();
-                segmented.cutout.recycle();
-                segmented.source.recycle();
-                if (background != null) {
-                    background.recycle();
-                }
-                if (frameIndex % 3 == 0 || frameIndex == frameCount - 1) {
-                    int progress = Math.min(96,
-                            Math.round((frameIndex + 1) * 96f / frameCount));
-                    setProgressAsync(new Data.Builder()
-                            .putInt(KEY_PROGRESS, progress).build());
-                }
+            int encodedFrames;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && sourceFrameCount > 0) {
+                encodedFrames = encodeIndexedFrames(sourceRetriever, sourceFrameCount,
+                        frameCount, frameRate, rotation, metadataWidth, metadataHeight,
+                        mirrorSource, width, height, threshold, softness,
+                        segmenter, backgroundProvider, encoder);
+            } else {
+                encodedFrames = encodeTimedFrames(sourceRetriever, frameCount, frameRate,
+                        durationUs, rotation, metadataWidth, metadataHeight, mirrorSource,
+                        width, height, threshold, softness,
+                        segmenter, backgroundProvider, encoder);
             }
+            if (encodedFrames == 0) throw new IOException("Aucune image vidéo décodable");
             encoder.finish();
             encoder.close();
             encoder = null;
@@ -186,6 +171,104 @@ public final class VideoExportWorker extends Worker {
 
     private Result failure(String message) {
         return Result.failure(new Data.Builder().putString(KEY_ERROR, message).build());
+    }
+
+    private int encodeIndexedFrames(MediaMetadataRetriever retriever,
+                                    int sourceFrameCount, int targetFrameCount,
+                                    int frameRate, int rotation, int metadataWidth,
+                                    int metadataHeight, boolean mirrorSource,
+                                    int width, int height, float threshold, float softness,
+                                    SegmentationEngine segmenter,
+                                    BackgroundProvider backgroundProvider,
+                                    H264FrameEncoder encoder) throws Exception {
+        MediaMetadataRetriever.BitmapParams bitmapParams =
+                new MediaMetadataRetriever.BitmapParams();
+        bitmapParams.setPreferredConfig(Bitmap.Config.ARGB_8888);
+        final int batchSize = 6;
+        double sourceStep = sourceFrameCount / (double) targetFrameCount;
+        double nextSourceIndex = 0d;
+        int outputIndex = 0;
+
+        for (int batchStart = 0; batchStart < sourceFrameCount
+                && outputIndex < targetFrameCount; batchStart += batchSize) {
+            if (isStopped()) throw new IOException("Export annulé");
+            int count = Math.min(batchSize, sourceFrameCount - batchStart);
+            List<Bitmap> frames = retriever.getFramesAtIndex(batchStart, count, bitmapParams);
+            for (int item = 0; item < frames.size(); item++) {
+                Bitmap frame = frames.get(item);
+                int sourceIndex = batchStart + item;
+                if (frame == null) continue;
+                if (sourceIndex + 0.5d < nextSourceIndex) {
+                    frame.recycle();
+                    continue;
+                }
+                long timeUs = outputIndex * 1_000_000L / frameRate;
+                encodeOneFrame(frame, timeUs, rotation, metadataWidth, metadataHeight,
+                        mirrorSource, width, height, threshold, softness,
+                        segmenter, backgroundProvider, encoder);
+                outputIndex++;
+                nextSourceIndex = outputIndex * sourceStep;
+            }
+            int progress = Math.min(96,
+                    Math.round(Math.min(sourceFrameCount, batchStart + count)
+                            * 96f / sourceFrameCount));
+            setProgressAsync(new Data.Builder().putInt(KEY_PROGRESS, progress).build());
+        }
+        return outputIndex;
+    }
+
+    private int encodeTimedFrames(MediaMetadataRetriever retriever,
+                                  int frameCount, int frameRate, long durationUs,
+                                  int rotation, int metadataWidth, int metadataHeight,
+                                  boolean mirrorSource, int width, int height,
+                                  float threshold, float softness,
+                                  SegmentationEngine segmenter,
+                                  BackgroundProvider backgroundProvider,
+                                  H264FrameEncoder encoder) throws Exception {
+        int encoded = 0;
+        for (int frameIndex = 0; frameIndex < frameCount; frameIndex++) {
+            if (isStopped()) throw new IOException("Export annulé");
+            long timeUs = frameIndex * 1_000_000L / frameRate;
+            Bitmap frame = retriever.getFrameAtTime(Math.min(timeUs, durationUs - 1),
+                    MediaMetadataRetriever.OPTION_CLOSEST);
+            if (frame != null) {
+                encodeOneFrame(frame, timeUs, rotation, metadataWidth, metadataHeight,
+                        mirrorSource, width, height, threshold, softness,
+                        segmenter, backgroundProvider, encoder);
+                encoded++;
+            }
+            if (frameIndex % 3 == 0 || frameIndex == frameCount - 1) {
+                int progress = Math.min(96,
+                        Math.round((frameIndex + 1) * 96f / frameCount));
+                setProgressAsync(new Data.Builder().putInt(KEY_PROGRESS, progress).build());
+            }
+        }
+        return encoded;
+    }
+
+    private static void encodeOneFrame(Bitmap frame, long timeUs,
+                                       int rotation, int metadataWidth, int metadataHeight,
+                                       boolean mirrorSource, int width, int height,
+                                       float threshold, float softness,
+                                       SegmentationEngine segmenter,
+                                       BackgroundProvider backgroundProvider,
+                                       H264FrameEncoder encoder) throws Exception {
+        frame = orientFrame(frame, rotation, metadataWidth, metadataHeight);
+        if (mirrorSource) frame = BitmapUtils.rotateAndMirror(frame, 0, true);
+        Bitmap prepared = BitmapUtils.centerCrop(frame, width, height);
+        frame.recycle();
+
+        SegmentationEngine.Result segmented = segmenter.processStillBlocking(
+                prepared, threshold, softness);
+        Bitmap background = backgroundProvider.frameAt(timeUs, width, height);
+        Bitmap composite = BitmapUtils.composite(segmented.cutout, background,
+                backgroundProvider.getColor(), width, height);
+        encoder.encode(composite, timeUs);
+
+        composite.recycle();
+        segmented.cutout.recycle();
+        segmented.source.recycle();
+        if (background != null) background.recycle();
     }
 
     private static Bitmap orientFrame(Bitmap bitmap, int rotation,
@@ -237,6 +320,11 @@ public final class VideoExportWorker extends Worker {
         private int videoRotation;
         private int videoOrientedWidth;
         private int videoOrientedHeight;
+        private int videoFrameCount;
+        private double videoFrameRate;
+        private boolean indexedFramesEnabled;
+        private int cachedStart = -1;
+        private final List<Bitmap> cachedFrames = new ArrayList<>();
 
         BackgroundProvider(Context context, BackgroundSpec.Type type, Uri uri,
                            int color, int maxDimension) throws IOException {
@@ -262,6 +350,14 @@ public final class VideoExportWorker extends Worker {
                 }
                 videoOrientedWidth = width;
                 videoOrientedHeight = height;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    videoFrameCount = readInt(videoRetriever,
+                            MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT, 0);
+                    indexedFramesEnabled = videoFrameCount > 0 && videoDurationUs > 0;
+                    if (indexedFramesEnabled) {
+                        videoFrameRate = videoFrameCount * 1_000_000d / videoDurationUs;
+                    }
+                }
             }
         }
 
@@ -271,8 +367,12 @@ public final class VideoExportWorker extends Worker {
             }
             if (type == BackgroundSpec.Type.VIDEO && videoRetriever != null) {
                 long target = videoDurationUs <= 0 ? 0 : timeUs % videoDurationUs;
-                Bitmap frame = videoRetriever.getFrameAtTime(target,
-                        MediaMetadataRetriever.OPTION_CLOSEST);
+                Bitmap frame = indexedFrame(target);
+                if (frame != null) frame = frame.copy(Bitmap.Config.ARGB_8888, false);
+                if (frame == null) {
+                    frame = videoRetriever.getFrameAtTime(target,
+                            MediaMetadataRetriever.OPTION_CLOSEST);
+                }
                 if (frame != null) {
                     frame = orientFrame(frame, videoRotation,
                             videoOrientedWidth, videoOrientedHeight);
@@ -282,6 +382,41 @@ public final class VideoExportWorker extends Worker {
                 }
             }
             return null;
+        }
+
+        private Bitmap indexedFrame(long timeUs) {
+            if (!indexedFramesEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                return null;
+            }
+            int targetIndex = Math.max(0, Math.min(videoFrameCount - 1,
+                    (int) Math.floor(timeUs * videoFrameRate / 1_000_000d)));
+            if (cachedStart >= 0 && targetIndex >= cachedStart
+                    && targetIndex < cachedStart + cachedFrames.size()) {
+                return cachedFrames.get(targetIndex - cachedStart);
+            }
+            recycleCachedFrames();
+            int count = Math.min(6, videoFrameCount - targetIndex);
+            try {
+                MediaMetadataRetriever.BitmapParams params =
+                        new MediaMetadataRetriever.BitmapParams();
+                params.setPreferredConfig(Bitmap.Config.ARGB_8888);
+                cachedFrames.addAll(videoRetriever.getFramesAtIndex(
+                        targetIndex, count, params));
+                cachedStart = targetIndex;
+                return cachedFrames.isEmpty() ? null : cachedFrames.get(0);
+            } catch (Exception ignored) {
+                indexedFramesEnabled = false;
+                recycleCachedFrames();
+                return null;
+            }
+        }
+
+        private void recycleCachedFrames() {
+            for (Bitmap frame : cachedFrames) {
+                if (frame != null && !frame.isRecycled()) frame.recycle();
+            }
+            cachedFrames.clear();
+            cachedStart = -1;
         }
 
         int getColor() {
@@ -295,6 +430,7 @@ public final class VideoExportWorker extends Worker {
                 image = null;
             }
             if (videoRetriever != null) {
+                recycleCachedFrames();
                 try {
                     videoRetriever.release();
                 } catch (IOException ignored) {

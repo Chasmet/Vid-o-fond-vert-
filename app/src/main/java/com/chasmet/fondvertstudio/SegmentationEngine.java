@@ -50,7 +50,7 @@ public final class SegmentationEngine implements AutoCloseable {
     private final ExecutorService resultExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean streamBusy = new AtomicBoolean(false);
-    private static final int INFERENCE_MAX_DIMENSION = 768;
+    private static final int INFERENCE_MAX_DIMENSION = 512;
     private volatile float threshold = 0.52f;
     private volatile float softness = 0.08f;
 
@@ -94,7 +94,7 @@ public final class SegmentationEngine implements AutoCloseable {
         streamSegmenter.process(input)
                 .addOnSuccessListener(resultExecutor, mask -> {
                     try {
-                        Result result = makeResult(bitmap, mask, threshold, softness);
+                        Result result = makeResult(bitmap, mask, threshold, softness, false);
                         mainHandler.post(() -> callback.onResult(result));
                     } catch (Exception error) {
                         bitmap.recycle();
@@ -124,7 +124,7 @@ public final class SegmentationEngine implements AutoCloseable {
                 SegmentationMask mask = Tasks.await(
                         stillSegmenter.process(InputImage.fromBitmap(inferenceBitmap, 0)),
                         60, TimeUnit.SECONDS);
-                Result result = makeResult(bitmap, mask, threshold, softness);
+                Result result = makeResult(bitmap, mask, threshold, softness, true);
                 mainHandler.post(() -> callback.onResult(result));
             } catch (Exception error) {
                 bitmap.recycle();
@@ -146,7 +146,7 @@ public final class SegmentationEngine implements AutoCloseable {
             SegmentationMask mask = Tasks.await(
                     streamSegmenter.process(InputImage.fromBitmap(inferenceBitmap, 0)),
                     60, TimeUnit.SECONDS);
-            return makeResult(bitmap, mask, localThreshold, localSoftness);
+            return makeResult(bitmap, mask, localThreshold, localSoftness, true);
         } finally {
             if (inferenceBitmap != bitmap && !inferenceBitmap.isRecycled()) {
                 inferenceBitmap.recycle();
@@ -155,7 +155,8 @@ public final class SegmentationEngine implements AutoCloseable {
     }
 
     private static Result makeResult(Bitmap bitmap, SegmentationMask segmentationMask,
-                                     float threshold, float softness) {
+                                     float threshold, float softness,
+                                     boolean createCutout) {
         int maskWidth = segmentationMask.getWidth();
         int maskHeight = segmentationMask.getHeight();
         ByteBuffer byteBuffer = segmentationMask.getBuffer();
@@ -163,8 +164,10 @@ public final class SegmentationEngine implements AutoCloseable {
         FloatBuffer buffer = byteBuffer.order(ByteOrder.nativeOrder()).asFloatBuffer();
         float[] mask = new float[maskWidth * maskHeight];
         buffer.get(mask);
-        Bitmap cutout = BitmapUtils.applyMask(bitmap, mask, maskWidth, maskHeight,
-                threshold, softness);
+        Bitmap cutout = createCutout
+                ? BitmapUtils.applyMask(bitmap, mask, maskWidth, maskHeight,
+                threshold, softness)
+                : null;
         return new Result(bitmap, cutout, mask, maskWidth, maskHeight);
     }
 

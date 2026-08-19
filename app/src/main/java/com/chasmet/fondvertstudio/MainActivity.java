@@ -62,7 +62,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * One simple flow: choose an untouched background, film the camera, export.
  */
 public final class MainActivity extends AppCompatActivity {
-    private ImageView subjectPreview;
+    private MaskedCameraView subjectPreview;
     private ImageView backgroundImage;
     private VideoView backgroundVideo;
     private View previewContainer;
@@ -97,7 +97,6 @@ public final class MainActivity extends AppCompatActivity {
     private long recordingStartedAt;
 
     private Bitmap currentSource;
-    private Bitmap currentCutout;
     private Bitmap backgroundPreviewBitmap;
     private float[] currentMask;
     private int currentMaskWidth;
@@ -232,9 +231,10 @@ public final class MainActivity extends AppCompatActivity {
                 return;
             }
             quality = quality == 720 ? 1080 : 720;
-            qualityButton.setText("CAM " + quality + "p");
+            qualityButton.setText("REC " + quality + "p");
             startCamera();
-            Toast.makeText(this, "Caméra et export en " + quality + "p",
+            Toast.makeText(this, "Enregistrement en " + quality
+                            + "p · aperçu fluide optimisé",
                     Toast.LENGTH_SHORT).show();
         });
         maskModeButton.setOnClickListener(v -> selectNextMaskPreset());
@@ -329,23 +329,12 @@ public final class MainActivity extends AppCompatActivity {
                 .requireLensFacing(lensFacing)
                 .build();
         try {
-            ImageAnalysis analysis = createImageAnalysis(quality == 1080
-                    ? new Size(1080, 1920) : new Size(720, 1280));
+            // L'enregistrement reste en 1080p. L'analyse 720p suffit pour le masque
+            // 256px du modèle et évite de bloquer le processeur avec 2 millions
+            // de pixels à chaque image.
+            ImageAnalysis analysis = createImageAnalysis(new Size(720, 1280));
             cameraProvider.bindToLifecycle(this, cameraSelector, analysis, videoCapture);
         } catch (Exception error) {
-            if (quality == 1080) {
-                try {
-                    cameraProvider.unbindAll();
-                    ImageAnalysis analysis = createImageAnalysis(new Size(720, 1280));
-                    cameraProvider.bindToLifecycle(this, cameraSelector, analysis, videoCapture);
-                    Toast.makeText(this,
-                            "Vidéo 1080p · aperçu optimisé à 720p sur cette caméra",
-                            Toast.LENGTH_LONG).show();
-                    return;
-                } catch (Exception ignored) {
-                    // The user receives the single clear error below.
-                }
-            }
             showError("Cette caméra ne permet pas le mode vidéo sélectionné");
         }
     }
@@ -526,51 +515,22 @@ public final class MainActivity extends AppCompatActivity {
     private void acceptResult(SegmentationEngine.Result result) {
         edgeGeneration.incrementAndGet();
         Bitmap oldSource = currentSource;
-        Bitmap oldCutout = currentCutout;
         currentSource = result.source;
-        currentCutout = result.cutout;
         currentMask = result.mask;
         currentMaskWidth = result.maskWidth;
         currentMaskHeight = result.maskHeight;
-        subjectPreview.setImageBitmap(currentCutout);
+        subjectPreview.setFrame(currentSource, currentMask,
+                currentMaskWidth, currentMaskHeight, threshold, softness);
         previewHint.setVisibility(View.GONE);
         if (oldSource != null && oldSource != currentSource && !oldSource.isRecycled()) {
             oldSource.recycle();
         }
-        if (oldCutout != null && oldCutout != currentCutout && !oldCutout.isRecycled()) {
-            oldCutout.recycle();
-        }
+        if (result.cutout != null && !result.cutout.isRecycled()) result.cutout.recycle();
     }
 
     private void refreshCurrentMask() {
-        Bitmap source = currentSource;
-        float[] mask = currentMask;
-        if (source == null || mask == null || source.isRecycled()) {
-            return;
-        }
-        int generation = edgeGeneration.incrementAndGet();
-        Bitmap safeSource = source.copy(Bitmap.Config.ARGB_8888, false);
-        int maskWidth = currentMaskWidth;
-        int maskHeight = currentMaskHeight;
-        float localThreshold = threshold;
-        float localSoftness = softness;
-        ioExecutor.execute(() -> {
-            Bitmap refreshed = BitmapUtils.applyMask(safeSource, mask,
-                    maskWidth, maskHeight, localThreshold, localSoftness);
-            safeSource.recycle();
-            runOnUiThread(() -> {
-                if (generation != edgeGeneration.get()) {
-                    refreshed.recycle();
-                    return;
-                }
-                Bitmap old = currentCutout;
-                currentCutout = refreshed;
-                subjectPreview.setImageBitmap(refreshed);
-                if (old != null && !old.isRecycled()) {
-                    old.recycle();
-                }
-            });
-        });
+        edgeGeneration.incrementAndGet();
+        subjectPreview.updateEdgeSettings(threshold, softness);
     }
 
     private void showTransparentBackground() {
@@ -717,15 +677,11 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void clearSubjectPreview() {
-        subjectPreview.setImageDrawable(null);
+        subjectPreview.clearFrame();
         if (currentSource != null && !currentSource.isRecycled()) {
             currentSource.recycle();
         }
-        if (currentCutout != null && !currentCutout.isRecycled()) {
-            currentCutout.recycle();
-        }
         currentSource = null;
-        currentCutout = null;
         currentMask = null;
     }
 

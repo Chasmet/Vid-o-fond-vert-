@@ -55,7 +55,7 @@
             android:minWidth="0dp"
             android:paddingStart="13dp"
             android:paddingEnd="13dp"
-            android:text="CAM 1080p"
+            android:text="REC 1080p"
             android:textColor="@color/accent"
             android:textSize="12sp"
             app:cornerRadius="14dp"
@@ -103,12 +103,11 @@
                 android:layout_height="match_parent"
                 android:visibility="gone" />
 
-            <ImageView
+            <com.chasmet.fondvertstudio.MaskedCameraView
                 android:id="@+id/subjectPreview"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:contentDescription="@string/preview_hint"
-                android:scaleType="centerCrop" />
+                android:contentDescription="@string/preview_hint" />
 
             <TextView
                 android:id="@+id/previewHint"
