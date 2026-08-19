@@ -29,6 +29,10 @@ public final class VideoExportWorker extends Worker {
     public static final String KEY_SOFTNESS = "softness";
     public static final String KEY_QUALITY = "quality";
     public static final String KEY_MIRROR_SOURCE = "mirror_source";
+    public static final String KEY_TRANSFORM_PATH = "transform_path";
+    public static final String KEY_TRANSFORM_SCALE = "transform_scale";
+    public static final String KEY_TRANSFORM_CENTER_X = "transform_center_x";
+    public static final String KEY_TRANSFORM_CENTER_Y = "transform_center_y";
     public static final String KEY_PROGRESS = "progress";
     public static final String KEY_OUTPUT_URI = "output_uri";
     public static final String KEY_ERROR = "error";
@@ -60,10 +64,29 @@ public final class VideoExportWorker extends Worker {
         if (backgroundType == BackgroundSpec.Type.TRANSPARENT) {
             backgroundColor = Color.rgb(0, 255, 0);
         }
-        float threshold = getInputData().getFloat(KEY_THRESHOLD, 0.52f);
-        float softness = getInputData().getFloat(KEY_SOFTNESS, 0.08f);
+        float threshold = getInputData().getFloat(KEY_THRESHOLD, 0.50f);
+        float softness = getInputData().getFloat(KEY_SOFTNESS, 0.065f);
         int quality = getInputData().getInt(KEY_QUALITY, 1080);
         boolean mirrorSource = getInputData().getBoolean(KEY_MIRROR_SOURCE, false);
+        float fallbackScale = getInputData().getFloat(KEY_TRANSFORM_SCALE,
+                SubjectTransformTimeline.DEFAULT_SCALE);
+        float fallbackCenterX = getInputData().getFloat(KEY_TRANSFORM_CENTER_X,
+                SubjectTransformTimeline.DEFAULT_CENTER_X);
+        float fallbackCenterY = getInputData().getFloat(KEY_TRANSFORM_CENTER_Y,
+                SubjectTransformTimeline.DEFAULT_CENTER_Y);
+        String transformPath = getInputData().getString(KEY_TRANSFORM_PATH);
+        File transformFile = transformPath == null ? null : new File(transformPath);
+        SubjectTransformTimeline transformTimeline = new SubjectTransformTimeline();
+        if (transformFile != null && transformFile.isFile()) {
+            try {
+                transformTimeline = SubjectTransformTimeline.read(transformFile);
+            } catch (IOException ignored) {
+                // Repli sur la dernière transformation reçue avec la tâche.
+            }
+        }
+        if (transformTimeline.isEmpty()) {
+            transformTimeline.add(0L, fallbackScale, fallbackCenterX, fallbackCenterY);
+        }
 
         Context context = getApplicationContext();
         File workDirectory = new File(context.getCacheDir(), "video_exports");
@@ -123,12 +146,12 @@ public final class VideoExportWorker extends Worker {
                 encodedFrames = encodeIndexedFrames(sourceRetriever, sourceFrameCount,
                         frameCount, frameRate, rotation, metadataWidth, metadataHeight,
                         mirrorSource, width, height, threshold, softness,
-                        segmenter, backgroundProvider, encoder);
+                        segmenter, backgroundProvider, transformTimeline, encoder);
             } else {
                 encodedFrames = encodeTimedFrames(sourceRetriever, frameCount, frameRate,
                         durationUs, rotation, metadataWidth, metadataHeight, mirrorSource,
                         width, height, threshold, softness,
-                        segmenter, backgroundProvider, encoder);
+                        segmenter, backgroundProvider, transformTimeline, encoder);
             }
             if (encodedFrames == 0) throw new IOException("Aucune image vidéo décodable");
             encoder.finish();
@@ -168,6 +191,10 @@ public final class VideoExportWorker extends Worker {
                 //noinspection ResultOfMethodCallIgnored
                 finalVideo.delete();
             }
+            if (transformFile != null && transformFile.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                transformFile.delete();
+            }
         }
     }
 
@@ -183,6 +210,7 @@ public final class VideoExportWorker extends Worker {
                                     int width, int height, float threshold, float softness,
                                     SegmentationEngine segmenter,
                                     BackgroundProvider backgroundProvider,
+                                    SubjectTransformTimeline transformTimeline,
                                     H264FrameEncoder encoder) throws Exception {
         MediaMetadataRetriever.BitmapParams bitmapParams =
                 new MediaMetadataRetriever.BitmapParams();
@@ -208,7 +236,7 @@ public final class VideoExportWorker extends Worker {
                 long timeUs = outputIndex * 1_000_000L / frameRate;
                 encodeOneFrame(frame, timeUs, rotation, metadataWidth, metadataHeight,
                         mirrorSource, width, height, threshold, softness,
-                        segmenter, backgroundProvider, encoder);
+                        segmenter, backgroundProvider, transformTimeline, encoder);
                 outputIndex++;
                 nextSourceIndex = outputIndex * sourceStep;
             }
@@ -227,6 +255,7 @@ public final class VideoExportWorker extends Worker {
                                   float threshold, float softness,
                                   SegmentationEngine segmenter,
                                   BackgroundProvider backgroundProvider,
+                                  SubjectTransformTimeline transformTimeline,
                                   H264FrameEncoder encoder) throws Exception {
         int encoded = 0;
         for (int frameIndex = 0; frameIndex < frameCount; frameIndex++) {
@@ -237,7 +266,7 @@ public final class VideoExportWorker extends Worker {
             if (frame != null) {
                 encodeOneFrame(frame, timeUs, rotation, metadataWidth, metadataHeight,
                         mirrorSource, width, height, threshold, softness,
-                        segmenter, backgroundProvider, encoder);
+                        segmenter, backgroundProvider, transformTimeline, encoder);
                 encoded++;
             }
             if (frameIndex % 3 == 0 || frameIndex == frameCount - 1) {
@@ -255,6 +284,7 @@ public final class VideoExportWorker extends Worker {
                                        float threshold, float softness,
                                        SegmentationEngine segmenter,
                                        BackgroundProvider backgroundProvider,
+                                       SubjectTransformTimeline transformTimeline,
                                        H264FrameEncoder encoder) throws Exception {
         frame = orientFrame(frame, rotation, metadataWidth, metadataHeight);
         if (mirrorSource) frame = BitmapUtils.rotateAndMirror(frame, 0, true);
@@ -264,9 +294,10 @@ public final class VideoExportWorker extends Worker {
         SegmentationEngine.Result segmented = segmenter.processStillBlocking(
                 prepared, threshold, softness);
         Bitmap background = backgroundProvider.frameAt(timeUs, width, height);
+        SubjectTransformTimeline.Transform transform = transformTimeline.at(timeUs);
         Bitmap composite = BitmapUtils.compositeWithMask(segmented.source,
                 segmented.alphaMask, background, backgroundProvider.getColor(),
-                width, height);
+                width, height, transform.scale, transform.centerX, transform.centerY);
         encoder.encode(composite, timeUs);
 
         composite.recycle();

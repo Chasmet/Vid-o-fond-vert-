@@ -69,6 +69,7 @@ public final class MainActivity extends AppCompatActivity {
     private TextView previewHint;
     private TextView backgroundStatus;
     private TextView recordingTimer;
+    private TextView transformHint;
     private LinearLayout processingOverlay;
     private ProgressBar processingProgress;
     private TextView processingText;
@@ -76,14 +77,15 @@ public final class MainActivity extends AppCompatActivity {
     private MaterialButton flipCameraButton;
     private MaterialButton qualityButton;
     private MaterialButton maskModeButton;
+    private MaterialButton resetSubjectButton;
     private MaterialButton[] backgroundButtons;
 
     private final BackgroundSpec backgroundSpec = new BackgroundSpec();
     private int quality = 1080;
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
     private int maskPreset;
-    private float threshold = 0.52f;
-    private float softness = 0.08f;
+    private float threshold = 0.50f;
+    private float softness = 0.065f;
     private ProcessCameraProvider cameraProvider;
     private VideoCapture<Recorder> videoCapture;
     private Recording activeRecording;
@@ -95,6 +97,11 @@ public final class MainActivity extends AppCompatActivity {
     private final AtomicInteger edgeGeneration = new AtomicInteger();
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private long recordingStartedAt;
+    private long lastTransformSampleAt;
+    private boolean recordingTransformActive;
+    private final SubjectTransformTimeline transformTimeline =
+            new SubjectTransformTimeline();
+    private static final long TRANSFORM_SAMPLE_INTERVAL_MS = 34L;
 
     private Bitmap currentSource;
     private Bitmap backgroundPreviewBitmap;
@@ -144,6 +151,7 @@ public final class MainActivity extends AppCompatActivity {
         previewHint = findViewById(R.id.previewHint);
         backgroundStatus = findViewById(R.id.backgroundStatus);
         recordingTimer = findViewById(R.id.recordingTimer);
+        transformHint = findViewById(R.id.transformHint);
         processingOverlay = findViewById(R.id.processingOverlay);
         processingProgress = findViewById(R.id.processingProgress);
         processingText = findViewById(R.id.processingText);
@@ -151,6 +159,7 @@ public final class MainActivity extends AppCompatActivity {
         flipCameraButton = findViewById(R.id.flipCameraButton);
         qualityButton = findViewById(R.id.qualityButton);
         maskModeButton = findViewById(R.id.maskModeButton);
+        resetSubjectButton = findViewById(R.id.resetSubjectButton);
     }
 
     private void registerLaunchers() {
@@ -238,6 +247,15 @@ public final class MainActivity extends AppCompatActivity {
                     Toast.LENGTH_SHORT).show();
         });
         maskModeButton.setOnClickListener(v -> selectNextMaskPreset());
+        resetSubjectButton.setOnClickListener(v -> subjectPreview.resetSubjectTransform());
+        subjectPreview.setTransformListener((scale, centerX, centerY, gestureFinished) -> {
+            int percent = Math.round(scale * 100f);
+            resetSubjectButton.setText("↺ " + percent + " %");
+            transformHint.setText(gestureFinished
+                    ? "Glisse pour déplacer · pince pour zoomer"
+                    : "SUJET · " + percent + " %");
+            recordSubjectTransform(gestureFinished);
+        });
 
         backgroundSpec.setColor(Color.rgb(0, 255, 0));
         showColorBackground(Color.rgb(0, 255, 0));
@@ -254,16 +272,16 @@ public final class MainActivity extends AppCompatActivity {
     private void selectNextMaskPreset() {
         maskPreset = (maskPreset + 1) % 3;
         if (maskPreset == 1) {
-            threshold = 0.43f;
-            softness = 0.16f;
+            threshold = 0.42f;
+            softness = 0.13f;
             maskModeButton.setText("Contour · Cheveux");
         } else if (maskPreset == 2) {
             threshold = 0.48f;
-            softness = 0.13f;
+            softness = 0.10f;
             maskModeButton.setText("Contour · Doux");
         } else {
-            threshold = 0.52f;
-            softness = 0.08f;
+            threshold = 0.50f;
+            softness = 0.065f;
             maskModeButton.setText("Contour · HD net");
         }
         if (segmenter != null) {
@@ -320,6 +338,7 @@ public final class MainActivity extends AppCompatActivity {
             return;
         }
         cameraProvider.unbindAll();
+        segmenter.resetStreamHistory();
         Quality preferred = quality == 1080 ? Quality.FHD : Quality.HD;
         QualitySelector selector = QualitySelector.from(preferred,
                 FallbackStrategy.lowerQualityOrHigherThan(Quality.SD));
@@ -418,12 +437,14 @@ public final class MainActivity extends AppCompatActivity {
                     showRecordingUi();
                 } else if (event instanceof VideoRecordEvent.Finalize) {
                     VideoRecordEvent.Finalize finalized = (VideoRecordEvent.Finalize) event;
+                    File transformFile = finishSubjectTransformTimeline();
                     activeRecording = null;
                     showIdleUi();
                     if (finalized.getError() == VideoRecordEvent.Finalize.ERROR_NONE
                             && activeRawFile != null && activeRawFile.exists()) {
-                        enqueueVideoExport(Uri.fromFile(activeRawFile));
+                        enqueueVideoExport(Uri.fromFile(activeRawFile), transformFile);
                     } else {
+                        deleteFile(transformFile);
                         showError("Enregistrement interrompu");
                     }
                 }
@@ -441,11 +462,13 @@ public final class MainActivity extends AppCompatActivity {
         }
         recordButton.setEnabled(false);
         recordButton.setText("Finalisation…");
+        recordSubjectTransform(true);
         activeRecording.stop();
     }
 
     private void showRecordingUi() {
         recordingStartedAt = SystemClock.elapsedRealtime();
+        beginSubjectTransformTimeline();
         recordingTimer.setText("00:00");
         recordingTimer.setVisibility(View.VISIBLE);
         recordButton.setText("■  ARRÊTER   00:00");
@@ -469,7 +492,7 @@ public final class MainActivity extends AppCompatActivity {
         updateBackgroundStatus();
     }
 
-    private void enqueueVideoExport(Uri sourceUri) {
+    private void enqueueVideoExport(Uri sourceUri, File transformFile) {
         if (backgroundSpec.getType() == BackgroundSpec.Type.TRANSPARENT) {
             Toast.makeText(this,
                     "Sans décor, le MP4 utilise un vert pur compatible CapCut",
@@ -484,7 +507,17 @@ public final class MainActivity extends AppCompatActivity {
                 .putFloat(VideoExportWorker.KEY_SOFTNESS, softness)
                 .putInt(VideoExportWorker.KEY_QUALITY, quality)
                 .putBoolean(VideoExportWorker.KEY_MIRROR_SOURCE,
-                        lensFacing == CameraSelector.LENS_FACING_FRONT);
+                        lensFacing == CameraSelector.LENS_FACING_FRONT)
+                .putFloat(VideoExportWorker.KEY_TRANSFORM_SCALE,
+                        subjectPreview.getSubjectScale())
+                .putFloat(VideoExportWorker.KEY_TRANSFORM_CENTER_X,
+                        subjectPreview.getSubjectCenterX())
+                .putFloat(VideoExportWorker.KEY_TRANSFORM_CENTER_Y,
+                        subjectPreview.getSubjectCenterY());
+        if (transformFile != null) {
+            input.putString(VideoExportWorker.KEY_TRANSFORM_PATH,
+                    transformFile.getAbsolutePath());
+        }
         if (backgroundSpec.getUri() != null) {
             input.putString(VideoExportWorker.KEY_BACKGROUND_URI,
                     backgroundSpec.getUri().toString());
@@ -494,6 +527,54 @@ public final class MainActivity extends AppCompatActivity {
                 .build();
         WorkManager.getInstance(this).enqueue(request);
         observeExport(request);
+    }
+
+    private void beginSubjectTransformTimeline() {
+        transformTimeline.clear();
+        recordingTransformActive = true;
+        lastTransformSampleAt = Long.MIN_VALUE;
+        transformTimeline.add(0L, subjectPreview.getSubjectScale(),
+                subjectPreview.getSubjectCenterX(), subjectPreview.getSubjectCenterY());
+        lastTransformSampleAt = recordingStartedAt;
+    }
+
+    private void recordSubjectTransform(boolean force) {
+        if (!recordingTransformActive || recordingStartedAt <= 0L) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (!force && now - lastTransformSampleAt < TRANSFORM_SAMPLE_INTERVAL_MS) {
+            return;
+        }
+        long elapsedUs = Math.max(0L, now - recordingStartedAt) * 1000L;
+        transformTimeline.add(elapsedUs, subjectPreview.getSubjectScale(),
+                subjectPreview.getSubjectCenterX(), subjectPreview.getSubjectCenterY());
+        lastTransformSampleAt = now;
+    }
+
+    private File finishSubjectTransformTimeline() {
+        if (!recordingTransformActive) {
+            return null;
+        }
+        recordSubjectTransform(true);
+        recordingTransformActive = false;
+        File directory = new File(getCacheDir(), "subject_transforms");
+        File file = new File(directory,
+                "movement_" + System.currentTimeMillis() + ".csv");
+        try {
+            transformTimeline.write(file);
+            return file;
+        } catch (Exception error) {
+            deleteFile(file);
+            return null;
+        }
+    }
+
+    private static void deleteFile(File file) {
+        if (file != null && file.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            file.delete();
+        }
     }
 
     private void observeExport(OneTimeWorkRequest request) {

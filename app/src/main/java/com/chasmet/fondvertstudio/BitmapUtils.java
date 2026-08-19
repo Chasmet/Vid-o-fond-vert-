@@ -162,7 +162,7 @@ public final class BitmapUtils {
                 float bottom = refinedMask[y1 * maskWidth + x0] * (1f - fx)
                         + refinedMask[y1 * maskWidth + x1] * fx;
                 float confidence = top * (1f - fy) + bottom * fy;
-                float alpha = smoothStep(edge0, edge1, confidence);
+                float alpha = cleanMatteAlpha(smoothStep(edge0, edge1, confidence));
                 int original = sourcePixels[row + x];
                 int originalAlpha = Color.alpha(original);
                 int finalAlpha = Math.round(originalAlpha * alpha);
@@ -184,8 +184,9 @@ public final class BitmapUtils {
         float edge0 = clamp(threshold - softness, 0f, 1f);
         float edge1 = clamp(threshold + softness, edge0 + 0.001f, 1f);
         for (int index = 0; index < refined.length; index++) {
-            alpha[index] = (byte) Math.round(255f
-                    * smoothStep(edge0, edge1, refined[index]));
+            float matte = cleanMatteAlpha(smoothStep(
+                    edge0, edge1, refined[index]));
+            alpha[index] = (byte) Math.round(255f * matte);
         }
         Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ALPHA_8);
         output.copyPixelsFromBuffer(ByteBuffer.wrap(alpha));
@@ -309,6 +310,18 @@ public final class BitmapUtils {
     public static Bitmap compositeWithMask(Bitmap subject, Bitmap alphaMask,
                                            Bitmap background, int color,
                                            int targetWidth, int targetHeight) {
+        return compositeWithMask(subject, alphaMask, background, color,
+                targetWidth, targetHeight,
+                SubjectTransformTimeline.DEFAULT_SCALE,
+                SubjectTransformTimeline.DEFAULT_CENTER_X,
+                SubjectTransformTimeline.DEFAULT_CENTER_Y);
+    }
+
+    public static Bitmap compositeWithMask(Bitmap subject, Bitmap alphaMask,
+                                           Bitmap background, int color,
+                                           int targetWidth, int targetHeight,
+                                           float subjectScale, float centerX,
+                                           float centerY) {
         Bitmap output = Bitmap.createBitmap(targetWidth, targetHeight,
                 Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(output);
@@ -321,11 +334,23 @@ public final class BitmapUtils {
             canvas.drawColor(color);
         }
 
+        float transformedWidth = targetWidth * clamp(subjectScale,
+                SubjectTransformTimeline.MIN_SCALE, SubjectTransformTimeline.MAX_SCALE);
+        float transformedHeight = targetHeight * clamp(subjectScale,
+                SubjectTransformTimeline.MIN_SCALE, SubjectTransformTimeline.MAX_SCALE);
+        float centerPixelsX = clamp(centerX, 0f, 1f) * targetWidth;
+        float centerPixelsY = clamp(centerY, 0f, 1f) * targetHeight;
+        RectF subjectTarget = new RectF(
+                centerPixelsX - transformedWidth * 0.5f,
+                centerPixelsY - transformedHeight * 0.5f,
+                centerPixelsX + transformedWidth * 0.5f,
+                centerPixelsY + transformedHeight * 0.5f);
+
         int layer = canvas.saveLayer(target, null);
-        canvas.drawBitmap(subject, null, target, filtered);
+        canvas.drawBitmap(subject, null, subjectTarget, filtered);
         Paint maskPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         maskPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
-        canvas.drawBitmap(alphaMask, null, target, maskPaint);
+        canvas.drawBitmap(alphaMask, null, subjectTarget, maskPaint);
         maskPaint.setXfermode(null);
         canvas.restoreToCount(layer);
         return output;
@@ -369,6 +394,13 @@ public final class BitmapUtils {
     private static float smoothStep(float edge0, float edge1, float value) {
         float t = clamp((value - edge0) / (edge1 - edge0), 0f, 1f);
         return t * t * (3f - 2f * t);
+    }
+
+    /** Conserve l'anticrénelage mais retire le voile gris des contours mobiles. */
+    private static float cleanMatteAlpha(float alpha) {
+        if (alpha <= 0.035f) return 0f;
+        if (alpha >= 0.965f) return 1f;
+        return smoothStep(0.07f, 0.93f, alpha);
     }
 
     private static float clamp(float value, float min, float max) {
