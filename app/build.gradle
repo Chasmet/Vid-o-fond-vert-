@@ -2,7 +2,7 @@ plugins {
     id 'com.android.application'
 }
 
-// Dépendances natives générées au build : aucun téléchargement n'est nécessaire sur le téléphone.
+// ===== RVM : conservé uniquement pour photo/export haute qualité =====
 def generatedRvmRoot = file("$buildDir/generated/rvm")
 def rvmAssetsDir = file("$generatedRvmRoot/assets")
 def rvmParamFile = file("$rvmAssetsDir/rvm_mobilenetv3.ncnn.param")
@@ -13,6 +13,26 @@ def ncnnSdkDir = file("$generatedRvmRoot/ncnn-sdk")
 def rvmParamUrl = 'https://raw.githubusercontent.com/nihui/ncnn-android-rvm/master/app/src/main/assets/rvm_mobilenetv3.ncnn.param'
 def rvmBinUrl = 'https://raw.githubusercontent.com/nihui/ncnn-android-rvm/master/app/src/main/assets/rvm_mobilenetv3.ncnn.bin'
 def ncnnUrl = 'https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-android.zip'
+
+// ===== PP-HumanSegV2-Lite : moteur dédié à l'aperçu temps réel =====
+def generatedHumanSegRoot = file("$buildDir/generated/pp-humanseg")
+def humanSegAssetsDir = file("$generatedHumanSegRoot/assets")
+def humanSegModelDir = file("$humanSegAssetsDir/pp_humanseg")
+def humanSegNbFile = file("$humanSegModelDir/model.nb")
+def humanSegZipFile = file("$generatedHumanSegRoot/pp_humansegv2_lite.zip")
+def humanSegExtractDir = file("$generatedHumanSegRoot/inference")
+def paddleArm64Tar = file("$generatedHumanSegRoot/paddle_lite_2_13_armv8.tar.gz")
+def paddleArmv7Tar = file("$generatedHumanSegRoot/paddle_lite_2_13_armv7.tar.gz")
+def paddleArm64ExtractDir = file("$generatedHumanSegRoot/paddle-arm64")
+def paddleArmv7ExtractDir = file("$generatedHumanSegRoot/paddle-armv7")
+def paddleJarFile = file("$generatedHumanSegRoot/libs/PaddlePredictor.jar")
+def paddleJniDir = file("$generatedHumanSegRoot/jniLibs")
+def paddleOptFile = file("$generatedHumanSegRoot/opt_linux_x86")
+
+def humanSegUrl = 'https://paddleseg.bj.bcebos.com/dygraph/pp_humanseg_v2/human_pp_humansegv2_lite_192x192_inference_model_with_softmax.zip'
+def paddleArm64Url = 'https://github.com/PaddlePaddle/Paddle-Lite/releases/download/v2.13-rc/inference_lite_lib.android.armv8.clang.c++_static.tar.gz'
+def paddleArmv7Url = 'https://github.com/PaddlePaddle/Paddle-Lite/releases/download/v2.13-rc/inference_lite_lib.android.armv7.clang.c++_static.tar.gz'
+def paddleOptUrl = 'https://github.com/PaddlePaddle/Paddle-Lite/releases/download/v2.13-rc/opt_linux_x86'
 
 def downloadTo = { String url, File target ->
     target.parentFile.mkdirs()
@@ -45,7 +65,6 @@ tasks.register('prepareRvmAssets') {
         if (rvmParamFile.length() < 20_000L || rvmBinFile.length() < 7_000_000L) {
             throw new GradleException('Modèle RVM incomplet')
         }
-        println "RVM prêt : ${String.format('%.1f', rvmBinFile.length() / 1024d / 1024d)} Mo"
     }
 }
 
@@ -54,7 +73,6 @@ tasks.register('prepareNcnnSdk') {
     doLast {
         File marker = new File(ncnnSdkDir, '.ready')
         if (!marker.isFile()) {
-            println 'Préparation de ncnn Android CPU 20260526…'
             if (!ncnnZipFile.isFile() || ncnnZipFile.length() < 15_000_000L) {
                 downloadTo(ncnnUrl, ncnnZipFile)
             }
@@ -67,9 +85,7 @@ tasks.register('prepareNcnnSdk') {
             def configs = fileTree(ncnnSdkDir).matching {
                 include '**/arm64-v8a/lib/cmake/ncnn/ncnnConfig.cmake'
             }.files
-            if (configs.isEmpty()) {
-                throw new GradleException('SDK ncnn Android invalide')
-            }
+            if (configs.isEmpty()) throw new GradleException('SDK ncnn Android invalide')
             marker.text = 'ncnn 20260526'
         }
     }
@@ -77,6 +93,116 @@ tasks.register('prepareNcnnSdk') {
 
 tasks.register('prepareRvmNativeDependencies') {
     dependsOn tasks.named('prepareRvmAssets'), tasks.named('prepareNcnnSdk')
+}
+
+// Runtime Java officiel Paddle Lite 2.13-rc, identique au convertisseur utilisé pour model.nb.
+tasks.register('preparePaddleLiteRuntime') {
+    outputs.files(paddleJarFile,
+            file("$paddleJniDir/arm64-v8a/libpaddle_lite_jni.so"),
+            file("$paddleJniDir/armeabi-v7a/libpaddle_lite_jni.so"))
+    doLast {
+        File arm64 = file("$paddleJniDir/arm64-v8a/libpaddle_lite_jni.so")
+        File armv7 = file("$paddleJniDir/armeabi-v7a/libpaddle_lite_jni.so")
+        if (paddleJarFile.isFile() && paddleJarFile.length() > 10_000L
+                && arm64.isFile() && arm64.length() > 500_000L
+                && armv7.isFile() && armv7.length() > 500_000L) return
+
+        println 'Préparation Paddle Lite Android 2.13-rc…'
+        if (!paddleArm64Tar.isFile() || paddleArm64Tar.length() < 1_000_000L) {
+            downloadTo(paddleArm64Url, paddleArm64Tar)
+        }
+        if (!paddleArmv7Tar.isFile() || paddleArmv7Tar.length() < 1_000_000L) {
+            downloadTo(paddleArmv7Url, paddleArmv7Tar)
+        }
+
+        delete paddleArm64ExtractDir
+        delete paddleArmv7ExtractDir
+        paddleArm64ExtractDir.mkdirs()
+        paddleArmv7ExtractDir.mkdirs()
+        copy {
+            from tarTree(resources.gzip(paddleArm64Tar))
+            into paddleArm64ExtractDir
+        }
+        copy {
+            from tarTree(resources.gzip(paddleArmv7Tar))
+            into paddleArmv7ExtractDir
+        }
+
+        File jarSource = fileTree(paddleArm64ExtractDir).matching {
+            include '**/java/jar/PaddlePredictor.jar'
+        }.files.find { it.isFile() }
+        File arm64Source = fileTree(paddleArm64ExtractDir).matching {
+            include '**/java/so/libpaddle_lite_jni.so'
+        }.files.find { it.isFile() }
+        File armv7Source = fileTree(paddleArmv7ExtractDir).matching {
+            include '**/java/so/libpaddle_lite_jni.so'
+        }.files.find { it.isFile() }
+        if (jarSource == null || arm64Source == null || armv7Source == null) {
+            throw new GradleException('Runtime Paddle Lite 2.13-rc Android incomplet')
+        }
+
+        paddleJarFile.parentFile.mkdirs()
+        arm64.parentFile.mkdirs()
+        armv7.parentFile.mkdirs()
+        java.nio.file.Files.copy(jarSource.toPath(), paddleJarFile.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        java.nio.file.Files.copy(arm64Source.toPath(), arm64.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        java.nio.file.Files.copy(armv7Source.toPath(), armv7.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        println 'Paddle Lite Android 2.13-rc prêt'
+    }
+}
+
+// Modèle officiel PaddleSeg converti avec l'outil officiel de la même version 2.13-rc.
+tasks.register('prepareHumanSegModel') {
+    outputs.file(humanSegNbFile)
+    doLast {
+        if (humanSegNbFile.isFile() && humanSegNbFile.length() > 100_000L) return
+        println 'Préparation du modèle PP-HumanSegV2-Lite 192x192…'
+        if (!humanSegZipFile.isFile() || humanSegZipFile.length() < 100_000L) {
+            downloadTo(humanSegUrl, humanSegZipFile)
+        }
+        if (!paddleOptFile.isFile() || paddleOptFile.length() < 1_000_000L) {
+            println 'Téléchargement Paddle Lite opt 2.13-rc…'
+            downloadTo(paddleOptUrl, paddleOptFile)
+        }
+        if (!paddleOptFile.setExecutable(true) && !paddleOptFile.canExecute()) {
+            throw new GradleException('Convertisseur Paddle Lite non exécutable')
+        }
+
+        delete humanSegExtractDir
+        humanSegExtractDir.mkdirs()
+        copy {
+            from zipTree(humanSegZipFile)
+            into humanSegExtractDir
+        }
+        File pdmodel = fileTree(humanSegExtractDir).matching { include '**/*.pdmodel' }
+                .files.find { it.isFile() }
+        File pdiparams = fileTree(humanSegExtractDir).matching { include '**/*.pdiparams' }
+                .files.find { it.isFile() }
+        if (pdmodel == null || pdiparams == null) {
+            throw new GradleException('Fichiers PaddleSeg inference introuvables')
+        }
+        humanSegModelDir.mkdirs()
+        File optimizeBase = file("$humanSegModelDir/model")
+        exec {
+            commandLine paddleOptFile.absolutePath,
+                    "--model_file=${pdmodel.absolutePath}",
+                    "--param_file=${pdiparams.absolutePath}",
+                    "--optimize_out=${optimizeBase.absolutePath}",
+                    '--valid_targets=arm',
+                    '--optimize_out_type=naive_buffer'
+        }
+        if (!humanSegNbFile.isFile() || humanSegNbFile.length() < 100_000L) {
+            throw new GradleException('Conversion PP-HumanSeg en model.nb échouée')
+        }
+        println "PP-HumanSegV2-Lite prêt : ${String.format('%.2f', humanSegNbFile.length() / 1024d / 1024d)} Mo"
+    }
+}
+
+tasks.register('prepareHumanSegDependencies') {
+    dependsOn tasks.named('preparePaddleLiteRuntime'), tasks.named('prepareHumanSegModel')
 }
 
 android {
@@ -88,8 +214,8 @@ android {
         applicationId 'com.chasmet.fondvertstudio'
         minSdk 21
         targetSdk 34
-        versionCode 14
-        versionName '1.8.2'
+        versionCode 15
+        versionName '1.9.0'
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         vectorDrawables.useSupportLibrary = true
@@ -109,6 +235,8 @@ android {
 
     sourceSets {
         main.assets.srcDir rvmAssetsDir
+        main.assets.srcDir humanSegAssetsDir
+        main.jniLibs.srcDir paddleJniDir
     }
 
     externalNativeBuild {
@@ -119,7 +247,7 @@ android {
     }
 
     androidResources {
-        noCompress += ['bin', 'param']
+        noCompress += ['bin', 'param', 'nb']
     }
 
     buildTypes {
@@ -144,11 +272,15 @@ android {
 
 tasks.named('preBuild').configure {
     dependsOn tasks.named('prepareRvmNativeDependencies')
+    dependsOn tasks.named('prepareHumanSegDependencies')
 }
 
 tasks.configureEach { task ->
     if (task.name.startsWith('configureCMake') || task.name.startsWith('buildCMake')) {
         task.dependsOn tasks.named('prepareNcnnSdk')
+    }
+    if (task.name.startsWith('compile') && task.name.contains('JavaWithJavac')) {
+        task.dependsOn tasks.named('preparePaddleLiteRuntime')
     }
 }
 
@@ -163,7 +295,9 @@ dependencies {
     implementation "androidx.camera:camera-lifecycle:${cameraxVersion}"
     implementation "androidx.camera:camera-video:${cameraxVersion}"
 
-    // ML Kit sert de guide humain asynchrone et de secours si le natif RVM ne charge pas.
+    implementation files(paddleJarFile)
+
+    // ML Kit n'est plus dans la boucle normale de l'aperçu ; il reste secours + guide export.
     implementation 'com.google.mlkit:segmentation-selfie:16.0.0-beta6'
     implementation 'androidx.work:work-runtime:2.9.1'
 }

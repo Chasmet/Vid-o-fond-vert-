@@ -36,24 +36,27 @@ jobs:
       - name: Autoriser Gradle
         run: chmod +x gradlew
 
-      - name: Compiler et tester l'APK RVM faible latence
+      - name: Compiler et tester PP-HumanSeg + rendu HQ
         run: ./gradlew --no-daemon clean assembleDebug lintDebug
 
-      - name: Vérifier RVM et le moteur natif
+      - name: Vérifier les moteurs locaux dans l'APK
         run: |
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/pp_humanseg/model.nb"
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/arm64-v8a/libpaddle_lite_jni.so"
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/armeabi-v7a/libpaddle_lite_jni.so"
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/rvm_mobilenetv3.ncnn.param"
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/rvm_mobilenetv3.ncnn.bin"
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/arm64-v8a/librvmncnn.so"
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/armeabi-v7a/librvmncnn.so"
-          echo "RVM MobileNetV3 + ncnn présents dans l'APK"
+          echo "PP-HumanSegV2-Lite aperçu + RVM export présents dans l'APK"
 
       - name: Nommer l'APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.8.2-RVM-Fluide.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.9.0-PP-HumanSeg-Fluide.apk
 
       - name: Publier l'APK
         uses: actions/upload-artifact@v4
         with:
           name: Fond-Vert-Studio-APK
-          path: Fond-Vert-Studio-v1.8.2-RVM-Fluide.apk
+          path: Fond-Vert-Studio-v1.9.0-PP-HumanSeg-Fluide.apk
           if-no-files-found: error
           retention-days: 30
