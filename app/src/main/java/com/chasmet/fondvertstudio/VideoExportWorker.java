@@ -1,5 +1,6 @@
 package com.chasmet.fondvertstudio;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -386,7 +387,7 @@ public final class VideoExportWorker extends Worker {
             return null;
         }
 
-        @RequiresApi(Build.VERSION_CODES.P)
+        @SuppressLint("NewApi") // Appel protégé par le test SDK au début de la méthode.
         private Bitmap indexedFrame(long timeUs) {
             if (!indexedFramesEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
                 return null;
