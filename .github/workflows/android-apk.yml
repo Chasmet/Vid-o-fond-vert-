@@ -48,15 +48,15 @@ jobs:
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/rvm_mobilenetv3.ncnn.bin"
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/arm64-v8a/librvmncnn.so"
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/armeabi-v7a/librvmncnn.so"
-          echo "PP-HumanSegV2-Lite aperçu + RVM export présents dans l'APK"
+          echo "PP-HumanSegV2-Lite + fallback Android 16 + RVM export présents dans l'APK"
 
       - name: Nommer l'APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.9.0-PP-HumanSeg-Fluide.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.9.1-Android16-Fix.apk
 
       - name: Publier l'APK
         uses: actions/upload-artifact@v4
         with:
           name: Fond-Vert-Studio-APK
-          path: Fond-Vert-Studio-v1.9.0-PP-HumanSeg-Fluide.apk
+          path: Fond-Vert-Studio-v1.9.1-Android16-Fix.apk
           if-no-files-found: error
           retention-days: 30

@@ -3,6 +3,7 @@ package com.chasmet.fondvertstudio;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.SystemClock;
 
 import com.baidu.paddle.lite.MobileConfig;
@@ -45,6 +46,15 @@ final class PpHumanSegEngine implements AutoCloseable {
     private final float[] input = new float[3 * INPUT_WIDTH * INPUT_HEIGHT];
 
     PpHumanSegEngine(Context context) throws Exception {
+        // Paddle Lite 2.13-rc provoque un arrêt natif sur certains appareils Android 16/API 36
+        // (notamment Honor/MagicOS). Une exception Java ne peut pas intercepter un SIGSEGV natif.
+        // On ne charge donc jamais le runtime Paddle sur API 36+ : SegmentationEngine bascule
+        // automatiquement vers ML Kit pour l'aperçu, tandis que RVM reste utilisé pour l'export HQ.
+        if (Build.VERSION.SDK_INT >= 36) {
+            throw new UnsupportedOperationException(
+                    "PP-HumanSeg désactivé sur Android 16 : aperçu ML Kit stable");
+        }
+
         Context app = context.getApplicationContext();
         File model = copyAssetIfNeeded(app, ASSET_MODEL, "pp_humanseg_v2/model.nb");
         MobileConfig config = new MobileConfig();
