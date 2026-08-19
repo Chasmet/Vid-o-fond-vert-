@@ -19,6 +19,6 @@ public final class ModeChooserActivity extends AppCompatActivity {
         classicButton.setOnClickListener(v ->
                 startActivity(new Intent(this, MainActivity.class)));
         musicButton.setOnClickListener(v ->
-                startActivity(new Intent(this, ClipMusicActivity.class)));
+                startActivity(new Intent(this, ClipTimelineActivity.class)));
     }
 }
