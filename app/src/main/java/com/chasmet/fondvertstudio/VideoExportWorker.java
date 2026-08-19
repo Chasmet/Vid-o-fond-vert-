@@ -155,7 +155,10 @@ public final class VideoExportWorker extends Worker {
             return failure(error.getMessage() == null
                     ? "Échec de l’export vidéo" : error.getMessage());
         } finally {
-            sourceRetriever.release();
+            try {
+                sourceRetriever.release();
+            } catch (IOException ignored) {
+            }
             if (backgroundProvider != null) {
                 backgroundProvider.close();
             }
@@ -269,7 +272,10 @@ public final class VideoExportWorker extends Worker {
                 image = null;
             }
             if (videoRetriever != null) {
-                videoRetriever.release();
+                try {
+                    videoRetriever.release();
+                } catch (IOException ignored) {
+                }
                 videoRetriever = null;
             }
         }
