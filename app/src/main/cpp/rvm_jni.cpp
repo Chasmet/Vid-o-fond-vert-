@@ -41,7 +41,7 @@ public:
     }
 
     bool predict(JNIEnv* env, jobject bitmap, int targetSize, bool highQuality,
-                 std::vector<unsigned char>& alpha, std::string& error) {
+                 std::vector<unsigned char>& rgba, std::string& error) {
         std::lock_guard<std::mutex> guard(lock);
 
         AndroidBitmapInfo info{};
@@ -146,14 +146,23 @@ public:
             return false;
         }
 
+        ncnn::Mat outFgr;
         ncnn::Mat outPha;
-        int result;
+        int resultFgr;
+        int resultPha;
         if (downsample) {
-            result = ex.extract(highQuality ? "out3" : "out5", outPha);
+            if (highQuality) {
+                resultFgr = ex.extract("out2", outFgr);
+                resultPha = ex.extract("out3", outPha);
+            } else {
+                resultFgr = ex.extract("out4", outFgr);
+                resultPha = ex.extract("out5", outPha);
+            }
         } else {
-            result = ex.extract("out1", outPha);
+            resultFgr = ex.extract("out0", outFgr);
+            resultPha = ex.extract("out1", outPha);
         }
-        if (result != 0 || outPha.empty()) {
+        if (resultFgr != 0 || resultPha != 0 || outFgr.empty() || outPha.empty()) {
             error = "inférence RVM échouée";
             clearState();
             return false;
@@ -173,35 +182,59 @@ public:
         r3 = next3;
         r4 = next4;
 
-        ncnn::Mat cropped;
         const int top = hpad / 2;
         const int bottom = hpad - top;
         const int left = wpad / 2;
         const int right = wpad - left;
+
+        ncnn::Mat croppedFgr;
+        ncnn::Mat croppedPha;
         if (top || bottom || left || right) {
-            ncnn::copy_cut_border(outPha, cropped, top, bottom, left, right);
+            ncnn::copy_cut_border(outFgr, croppedFgr, top, bottom, left, right);
+            ncnn::copy_cut_border(outPha, croppedPha, top, bottom, left, right);
         } else {
-            cropped = outPha;
+            croppedFgr = outFgr;
+            croppedPha = outPha;
         }
 
-        if (cropped.empty()) {
-            error = "alpha RVM vide";
+        if (croppedFgr.empty() || croppedPha.empty()) {
+            error = "sortie RVM vide";
             return false;
         }
-        if (cropped.w != w || cropped.h != h) {
+        if (croppedFgr.w != w || croppedFgr.h != h) {
             ncnn::Mat resized;
-            ncnn::resize_bilinear(cropped, resized, w, h);
-            cropped = resized;
+            ncnn::resize_bilinear(croppedFgr, resized, w, h);
+            croppedFgr = resized;
         }
-        if (cropped.w != w || cropped.h != h) {
-            error = "taille alpha RVM incorrecte";
+        if (croppedPha.w != w || croppedPha.h != h) {
+            ncnn::Mat resized;
+            ncnn::resize_bilinear(croppedPha, resized, w, h);
+            croppedPha = resized;
+        }
+        if (croppedFgr.w != w || croppedFgr.h != h
+                || croppedPha.w != w || croppedPha.h != h) {
+            error = "taille sortie RVM incorrecte";
             return false;
         }
 
-        const float denorm[1] = {255.f};
-        cropped.substract_mean_normalize(nullptr, denorm);
-        alpha.resize(static_cast<size_t>(w) * h);
-        cropped.to_pixels(alpha.data(), ncnn::Mat::PIXEL_GRAY);
+        const float denormRgb[3] = {255.f, 255.f, 255.f};
+        const float denormAlpha[1] = {255.f};
+        croppedFgr.substract_mean_normalize(nullptr, denormRgb);
+        croppedPha.substract_mean_normalize(nullptr, denormAlpha);
+
+        std::vector<unsigned char> rgb(static_cast<size_t>(w) * h * 3);
+        std::vector<unsigned char> alpha(static_cast<size_t>(w) * h);
+        croppedFgr.to_pixels(rgb.data(), ncnn::Mat::PIXEL_RGB);
+        croppedPha.to_pixels(alpha.data(), ncnn::Mat::PIXEL_GRAY);
+
+        rgba.resize(static_cast<size_t>(w) * h * 4);
+        const size_t pixelCount = static_cast<size_t>(w) * h;
+        for (size_t i = 0; i < pixelCount; i++) {
+            rgba[i * 4] = rgb[i * 3];
+            rgba[i * 4 + 1] = rgb[i * 3 + 1];
+            rgba[i * 4 + 2] = rgb[i * 3 + 2];
+            rgba[i * 4 + 3] = alpha[i];
+        }
         return true;
     }
 
@@ -282,21 +315,21 @@ Java_com_chasmet_fondvertstudio_RvmNcnnEngine_nativePredict(
         return nullptr;
     }
 
-    std::vector<unsigned char> alpha;
+    std::vector<unsigned char> rgba;
     std::string error;
     if (!engine->predict(env, bitmap, static_cast<int>(targetSize),
-                         highQuality == JNI_TRUE, alpha, error)) {
+                         highQuality == JNI_TRUE, rgba, error)) {
         throwJava(env, error.c_str());
         return nullptr;
     }
 
-    jbyteArray output = env->NewByteArray(static_cast<jsize>(alpha.size()));
+    jbyteArray output = env->NewByteArray(static_cast<jsize>(rgba.size()));
     if (!output) {
-        throwJava(env, "Mémoire alpha insuffisante");
+        throwJava(env, "Mémoire RVM insuffisante");
         return nullptr;
     }
-    env->SetByteArrayRegion(output, 0, static_cast<jsize>(alpha.size()),
-                            reinterpret_cast<const jbyte*>(alpha.data()));
+    env->SetByteArrayRegion(output, 0, static_cast<jsize>(rgba.size()),
+                            reinterpret_cast<const jbyte*>(rgba.data()));
     return output;
 }
 
