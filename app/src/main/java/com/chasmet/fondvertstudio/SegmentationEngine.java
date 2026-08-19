@@ -14,6 +14,8 @@ import com.google.mlkit.vision.segmentation.SegmentationMask;
 import com.google.mlkit.vision.segmentation.Segmenter;
 import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -119,8 +121,9 @@ public final class SegmentationEngine implements AutoCloseable {
                                      float threshold, float softness) {
         int maskWidth = segmentationMask.getWidth();
         int maskHeight = segmentationMask.getHeight();
-        FloatBuffer buffer = segmentationMask.getBuffer();
-        buffer.rewind();
+        ByteBuffer byteBuffer = segmentationMask.getBuffer();
+        byteBuffer.rewind();
+        FloatBuffer buffer = byteBuffer.order(ByteOrder.nativeOrder()).asFloatBuffer();
         float[] mask = new float[maskWidth * maskHeight];
         buffer.get(mask);
         Bitmap cutout = BitmapUtils.applyMask(bitmap, mask, maskWidth, maskHeight,
