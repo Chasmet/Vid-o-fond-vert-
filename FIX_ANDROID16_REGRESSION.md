@@ -1,0 +1,1 @@
+Correction v1.9.2 : retrait de PP-HumanSeg/Paddle Lite du runtime Android. Retour au pipeline RVM + ML Kit stable pour la caméra et Clip Musique, tout en conservant le détourage et l’export haute qualité.
