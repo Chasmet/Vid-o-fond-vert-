@@ -45,7 +45,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="MICRO COUPÉ · FOND VERT OBLIGATOIRE"
+                android:text="MICRO COUPÉ · DÉTOURAGE OBLIGATOIRE"
                 android:textColor="@color/ink_secondary"
                 android:textSize="9sp" />
         </LinearLayout>
@@ -69,11 +69,11 @@
         android:layout_height="0dp"
         android:layout_marginStart="10dp"
         android:layout_marginEnd="10dp"
-        android:layout_marginBottom="8dp"
+        android:layout_marginBottom="7dp"
         app:cardBackgroundColor="#00FF00"
         app:cardCornerRadius="24dp"
         app:cardElevation="0dp"
-        app:layout_constraintBottom_toTopOf="@id/musicCard"
+        app:layout_constraintBottom_toTopOf="@id/decorCard"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/clipTopBar"
@@ -87,6 +87,20 @@
             android:background="#00FF00"
             android:keepScreenOn="true">
 
+            <ImageView
+                android:id="@+id/backgroundImage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="Décor image"
+                android:scaleType="centerCrop"
+                android:visibility="gone" />
+
+            <com.chasmet.fondvertstudio.FillVideoView
+                android:id="@+id/backgroundVideo"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
             <com.chasmet.fondvertstudio.MaskedCameraView
                 android:id="@+id/subjectPreview"
                 android:layout_width="match_parent"
@@ -98,7 +112,7 @@
                 android:layout_height="wrap_content"
                 android:layout_gravity="center"
                 android:gravity="center"
-                android:text="Cadre ton plan.\nTu peux déplacer et zoomer le sujet au doigt."
+                android:text="Cadre ton plan.\nImporte une image ou une vidéo derrière toi."
                 android:textColor="#EEFFFFFF"
                 android:textSize="14sp" />
 
@@ -202,12 +216,100 @@
     </com.google.android.material.card.MaterialCardView>
 
     <com.google.android.material.card.MaterialCardView
-        android:id="@+id/musicCard"
+        android:id="@+id/decorCard"
         android:layout_width="0dp"
-        android:layout_height="166dp"
+        android:layout_height="74dp"
         android:layout_marginStart="10dp"
         android:layout_marginEnd="10dp"
-        android:layout_marginBottom="8dp"
+        android:layout_marginBottom="7dp"
+        app:cardBackgroundColor="@color/surface"
+        app:cardCornerRadius="18dp"
+        app:cardElevation="0dp"
+        app:layout_constraintBottom_toTopOf="@id/musicCard"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:strokeColor="@color/surface_high"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="9dp"
+            android:paddingEnd="9dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-black"
+                    android:text="1 · DÉCOR DU CLIP"
+                    android:textColor="@color/ink"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/decorStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Fond vert"
+                    android:textColor="@color/accent"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/importImageButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="72dp"
+                android:layout_height="44dp"
+                android:minWidth="0dp"
+                android:text="IMAGE"
+                android:textColor="@color/ink"
+                android:textSize="9sp"
+                app:cornerRadius="14dp"
+                app:strokeColor="@color/accent" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/importVideoButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="72dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="6dp"
+                android:minWidth="0dp"
+                android:text="VIDÉO"
+                android:textColor="@color/ink"
+                android:textSize="9sp"
+                app:cornerRadius="14dp"
+                app:strokeColor="@color/cyan" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/greenBackgroundButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="54dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="6dp"
+                android:minWidth="0dp"
+                android:text="VERT"
+                android:textColor="@color/ink"
+                android:textSize="9sp"
+                app:cornerRadius="14dp"
+                app:strokeColor="@color/surface_high" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/musicCard"
+        android:layout_width="0dp"
+        android:layout_height="156dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginBottom="7dp"
         app:cardBackgroundColor="@color/surface"
         app:cardCornerRadius="22dp"
         app:cardElevation="0dp"
@@ -221,7 +323,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="vertical"
-            android:padding="12dp">
+            android:padding="10dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -235,7 +337,7 @@
                     android:layout_height="44dp"
                     android:layout_weight="1"
                     android:fontFamily="sans-serif-black"
-                    android:text="1 · IMPORTER MUSIQUE"
+                    android:text="2 · IMPORTER MUSIQUE"
                     android:textColor="@color/background"
                     android:textSize="11sp"
                     app:backgroundTint="@color/accent"
@@ -258,25 +360,25 @@
             <TextView
                 android:id="@+id/audioName"
                 android:layout_width="match_parent"
-                android:layout_height="22dp"
-                android:layout_marginTop="4dp"
+                android:layout_height="20dp"
+                android:layout_marginTop="2dp"
                 android:ellipsize="end"
                 android:gravity="center_vertical"
                 android:maxLines="1"
                 android:text="Aucune musique sélectionnée"
                 android:textColor="@color/ink_secondary"
-                android:textSize="11sp" />
+                android:textSize="10sp" />
 
             <SeekBar
                 android:id="@+id/musicSeekBar"
                 android:layout_width="match_parent"
-                android:layout_height="34dp"
+                android:layout_height="32dp"
                 android:max="1000"
                 android:progress="0" />
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="28dp"
+                android:layout_height="26dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
@@ -296,7 +398,7 @@
                     android:layout_height="wrap_content"
                     android:text="Choisis le départ du son"
                     android:textColor="@color/accent"
-                    android:textSize="10sp" />
+                    android:textSize="9sp" />
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
@@ -304,14 +406,14 @@
     <LinearLayout
         android:id="@+id/recordBar"
         android:layout_width="0dp"
-        android:layout_height="116dp"
+        android:layout_height="108dp"
         android:background="@color/surface"
         android:gravity="center"
         android:orientation="horizontal"
         android:paddingStart="12dp"
-        android:paddingTop="10dp"
+        android:paddingTop="8dp"
         android:paddingEnd="12dp"
-        android:paddingBottom="12dp"
+        android:paddingBottom="10dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">
@@ -319,7 +421,7 @@
         <com.google.android.material.button.MaterialButton
             android:id="@+id/recordButton"
             android:layout_width="0dp"
-            android:layout_height="72dp"
+            android:layout_height="68dp"
             android:layout_weight="1"
             android:fontFamily="sans-serif-black"
             android:text="●  TOURNER"
@@ -332,7 +434,7 @@
             android:id="@+id/finishButton"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="118dp"
-            android:layout_height="72dp"
+            android:layout_height="68dp"
             android:layout_marginStart="8dp"
             android:fontFamily="sans-serif-black"
             android:text="TERMINER\nLE CLIP"
