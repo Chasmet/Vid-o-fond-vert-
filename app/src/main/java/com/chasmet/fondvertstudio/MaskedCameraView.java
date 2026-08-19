@@ -7,17 +7,13 @@ import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.RectF;
-import android.os.SystemClock;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
 
 /**
- * Affiche le flux caméra détouré avec le compositeur matériel Android.
- *
- * Le foreground calculé par RVM est publié en même temps que son alpha. Le View les consomme
- * ensemble afin d'éviter le défaut précédent où une image caméra récente était dessinée avec
- * le masque d'une image plus ancienne, particulièrement visible sur les mains en mouvement.
+ * Affiche le flux caméra et son masque avec le compositeur matériel Android.
+ * Le processeur ne fabrique plus un bitmap Full HD détouré à chaque frame.
  */
 public final class MaskedCameraView extends View {
     public interface TransformListener {
@@ -25,54 +21,11 @@ public final class MaskedCameraView extends View {
                                 boolean gestureFinished);
     }
 
-    private static final Object FOREGROUND_LOCK = new Object();
-    private static Bitmap publishedForeground;
-    private static long publishedAtMs;
-    private static final long PROCESSED_MODE_GRACE_MS = 900L;
-
-    static void publishProcessedForeground(Bitmap foreground) {
-        if (foreground == null || foreground.isRecycled()) return;
-        synchronized (FOREGROUND_LOCK) {
-            if (publishedForeground != null && publishedForeground != foreground
-                    && !publishedForeground.isRecycled()) {
-                publishedForeground.recycle();
-            }
-            publishedForeground = foreground;
-            publishedAtMs = SystemClock.elapsedRealtime();
-        }
-    }
-
-    static void clearPublishedForeground() {
-        synchronized (FOREGROUND_LOCK) {
-            if (publishedForeground != null && !publishedForeground.isRecycled()) {
-                publishedForeground.recycle();
-            }
-            publishedForeground = null;
-            publishedAtMs = 0L;
-        }
-    }
-
-    private static Bitmap consumeProcessedForeground() {
-        synchronized (FOREGROUND_LOCK) {
-            Bitmap value = publishedForeground;
-            publishedForeground = null;
-            return value;
-        }
-    }
-
-    private static long latestPublishedAtMs() {
-        synchronized (FOREGROUND_LOCK) {
-            return publishedAtMs;
-        }
-    }
-
     private final Paint cameraPaint = new Paint(Paint.ANTI_ALIAS_FLAG
             | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
     private final Paint maskPaint = new Paint(Paint.ANTI_ALIAS_FLAG
             | Paint.FILTER_BITMAP_FLAG);
     private Bitmap source;
-    private boolean sourceOwnedByView;
-    private long processedModeUntilMs;
     private Bitmap maskBitmap;
     private float[] mask;
     private int maskWidth;
@@ -137,7 +90,7 @@ public final class MaskedCameraView extends View {
 
     public void setFrame(Bitmap newSource, float[] newMask, int newMaskWidth,
                          int newMaskHeight, float newThreshold, float newSoftness) {
-        replaceSource(newSource, false);
+        setSource(newSource);
         mask = newMask;
         maskWidth = newMaskWidth;
         maskHeight = newMaskHeight;
@@ -148,23 +101,12 @@ public final class MaskedCameraView extends View {
     }
 
     public void setSource(Bitmap newSource) {
-        long now = SystemClock.elapsedRealtime();
-        long published = latestPublishedAtMs();
-        if (now < processedModeUntilMs || (published > 0L && now - published < PROCESSED_MODE_GRACE_MS)) {
-            // Pendant le détourage RVM, l'image brute ne doit pas désynchroniser le masque.
-            return;
-        }
-        replaceSource(newSource, false);
+        source = newSource;
         invalidate();
     }
 
     public void setMask(Bitmap newMaskBitmap, float[] newMask, int newMaskWidth,
                         int newMaskHeight, float newThreshold, float newSoftness) {
-        Bitmap processedForeground = consumeProcessedForeground();
-        if (processedForeground != null && !processedForeground.isRecycled()) {
-            replaceSource(processedForeground, true);
-            processedModeUntilMs = SystemClock.elapsedRealtime() + PROCESSED_MODE_GRACE_MS;
-        }
         recycleMaskBitmap();
         maskBitmap = newMaskBitmap;
         mask = newMask;
@@ -183,27 +125,10 @@ public final class MaskedCameraView extends View {
     }
 
     public void clearFrame() {
-        recycleOwnedSource();
         source = null;
-        sourceOwnedByView = false;
-        processedModeUntilMs = 0L;
         mask = null;
         recycleMaskBitmap();
         invalidate();
-    }
-
-    private void replaceSource(Bitmap newSource, boolean owned) {
-        Bitmap previous = source;
-        boolean previousOwned = sourceOwnedByView;
-        source = newSource;
-        sourceOwnedByView = owned;
-        if (previousOwned && previous != null && previous != newSource && !previous.isRecycled()) {
-            previous.recycle();
-        }
-    }
-
-    private void recycleOwnedSource() {
-        if (sourceOwnedByView && source != null && !source.isRecycled()) source.recycle();
     }
 
     private void rebuildMaskBitmap() {
@@ -303,7 +228,9 @@ public final class MaskedCameraView extends View {
                 return true;
             case MotionEvent.ACTION_UP:
                 getParent().requestDisallowInterceptTouchEvent(false);
-                if (!gestureMoved) performClick();
+                if (!gestureMoved) {
+                    performClick();
+                }
                 notifyTransform(true);
                 return true;
             case MotionEvent.ACTION_CANCEL:
@@ -330,18 +257,24 @@ public final class MaskedCameraView extends View {
 
     private static float focusX(MotionEvent event) {
         float total = 0f;
-        for (int index = 0; index < event.getPointerCount(); index++) total += event.getX(index);
+        for (int index = 0; index < event.getPointerCount(); index++) {
+            total += event.getX(index);
+        }
         return total / Math.max(1, event.getPointerCount());
     }
 
     private static float focusY(MotionEvent event) {
         float total = 0f;
-        for (int index = 0; index < event.getPointerCount(); index++) total += event.getY(index);
+        for (int index = 0; index < event.getPointerCount(); index++) {
+            total += event.getY(index);
+        }
         return total / Math.max(1, event.getPointerCount());
     }
 
     private static float pointerDistance(MotionEvent event) {
-        if (event.getPointerCount() < 2) return 0f;
+        if (event.getPointerCount() < 2) {
+            return 0f;
+        }
         float dx = event.getX(0) - event.getX(1);
         float dy = event.getY(0) - event.getY(1);
         return (float) Math.hypot(dx, dy);
@@ -354,9 +287,6 @@ public final class MaskedCameraView extends View {
     @Override
     protected void onDetachedFromWindow() {
         recycleMaskBitmap();
-        recycleOwnedSource();
-        source = null;
-        sourceOwnedByView = false;
         super.onDetachedFromWindow();
     }
 }

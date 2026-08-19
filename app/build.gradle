@@ -2,124 +2,19 @@ plugins {
     id 'com.android.application'
 }
 
-// Dépendances natives générées au build : aucun téléchargement n'est nécessaire sur le téléphone.
-def generatedRvmRoot = file("$buildDir/generated/rvm")
-def rvmAssetsDir = file("$generatedRvmRoot/assets")
-def rvmParamFile = file("$rvmAssetsDir/rvm_mobilenetv3.ncnn.param")
-def rvmBinFile = file("$rvmAssetsDir/rvm_mobilenetv3.ncnn.bin")
-def ncnnZipFile = file("$generatedRvmRoot/ncnn-20260526-android.zip")
-def ncnnSdkDir = file("$generatedRvmRoot/ncnn-sdk")
-
-def rvmParamUrl = 'https://raw.githubusercontent.com/nihui/ncnn-android-rvm/master/app/src/main/assets/rvm_mobilenetv3.ncnn.param'
-def rvmBinUrl = 'https://raw.githubusercontent.com/nihui/ncnn-android-rvm/master/app/src/main/assets/rvm_mobilenetv3.ncnn.bin'
-def ncnnUrl = 'https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-android.zip'
-
-def downloadTo = { String url, File target ->
-    target.parentFile.mkdirs()
-    File temporary = new File(target.parentFile, target.name + '.part')
-    if (temporary.exists()) temporary.delete()
-    new URL(url).withInputStream { input ->
-        temporary.withOutputStream { output ->
-            byte[] buffer = new byte[256 * 1024]
-            int count
-            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count)
-        }
-    }
-    if (target.exists()) target.delete()
-    if (!temporary.renameTo(target)) {
-        throw new GradleException('Impossible de finaliser ' + target.name)
-    }
-}
-
-tasks.register('prepareRvmAssets') {
-    outputs.files(rvmParamFile, rvmBinFile)
-    doLast {
-        if (!rvmParamFile.isFile() || rvmParamFile.length() < 20_000L) {
-            println 'Téléchargement du graphe RVM MobileNetV3…'
-            downloadTo(rvmParamUrl, rvmParamFile)
-        }
-        if (!rvmBinFile.isFile() || rvmBinFile.length() < 7_000_000L) {
-            println 'Téléchargement des poids RVM MobileNetV3 (~7,2 Mo)…'
-            downloadTo(rvmBinUrl, rvmBinFile)
-        }
-        if (rvmParamFile.length() < 20_000L || rvmBinFile.length() < 7_000_000L) {
-            throw new GradleException('Modèle RVM incomplet')
-        }
-        println "RVM prêt : ${String.format('%.1f', rvmBinFile.length() / 1024d / 1024d)} Mo"
-    }
-}
-
-tasks.register('prepareNcnnSdk') {
-    outputs.dir(ncnnSdkDir)
-    doLast {
-        File marker = new File(ncnnSdkDir, '.ready')
-        if (!marker.isFile()) {
-            println 'Préparation de ncnn Android CPU 20260526…'
-            if (!ncnnZipFile.isFile() || ncnnZipFile.length() < 15_000_000L) {
-                downloadTo(ncnnUrl, ncnnZipFile)
-            }
-            delete ncnnSdkDir
-            ncnnSdkDir.mkdirs()
-            copy {
-                from zipTree(ncnnZipFile)
-                into ncnnSdkDir
-            }
-            def configs = fileTree(ncnnSdkDir).matching {
-                include '**/arm64-v8a/lib/cmake/ncnn/ncnnConfig.cmake'
-            }.files
-            if (configs.isEmpty()) {
-                throw new GradleException('SDK ncnn Android invalide')
-            }
-            marker.text = 'ncnn 20260526'
-        }
-    }
-}
-
-tasks.register('prepareRvmNativeDependencies') {
-    dependsOn tasks.named('prepareRvmAssets'), tasks.named('prepareNcnnSdk')
-}
-
 android {
     namespace 'com.chasmet.fondvertstudio'
     compileSdk 34
-    ndkVersion '29.0.14206865'
 
     defaultConfig {
         applicationId 'com.chasmet.fondvertstudio'
         minSdk 21
         targetSdk 34
-        versionCode 16
-        versionName '1.9.2'
+        versionCode 17
+        versionName '1.10.0'
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         vectorDrawables.useSupportLibrary = true
-
-        ndk {
-            abiFilters 'arm64-v8a', 'armeabi-v7a'
-        }
-
-        externalNativeBuild {
-            cmake {
-                arguments "-DNCNN_SDK_ROOT=${ncnnSdkDir.absolutePath}",
-                        '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
-                cppFlags '-std=c++17 -O3'
-            }
-        }
-    }
-
-    sourceSets {
-        main.assets.srcDir rvmAssetsDir
-    }
-
-    externalNativeBuild {
-        cmake {
-            path file('src/main/cpp/CMakeLists.txt')
-            version '3.22.1'
-        }
-    }
-
-    androidResources {
-        noCompress += ['bin', 'param']
     }
 
     buildTypes {
@@ -142,16 +37,6 @@ android {
     }
 }
 
-tasks.named('preBuild').configure {
-    dependsOn tasks.named('prepareRvmNativeDependencies')
-}
-
-tasks.configureEach { task ->
-    if (task.name.startsWith('configureCMake') || task.name.startsWith('buildCMake')) {
-        task.dependsOn tasks.named('prepareNcnnSdk')
-    }
-}
-
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
@@ -163,7 +48,7 @@ dependencies {
     implementation "androidx.camera:camera-lifecycle:${cameraxVersion}"
     implementation "androidx.camera:camera-video:${cameraxVersion}"
 
-    // ML Kit sert de guide humain asynchrone et de secours si le natif RVM ne charge pas.
+    // Pipeline volontairement simple et stable pour le direct : une seule segmentation ML Kit.
     implementation 'com.google.mlkit:segmentation-selfie:16.0.0-beta6'
     implementation 'androidx.work:work-runtime:2.9.1'
 }

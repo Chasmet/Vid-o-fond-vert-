@@ -14,7 +14,7 @@ jobs:
   build:
     name: Fond Vert Studio APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
       - name: Récupérer le dépôt
@@ -26,38 +26,38 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Installer NDK et CMake
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" "cmake;3.22.1" >/dev/null
-
       - name: Préparer Gradle
         uses: gradle/actions/setup-gradle@v4
 
       - name: Autoriser Gradle
         run: chmod +x gradlew
 
-      - name: Compiler et tester la correction stable
-        run: ./gradlew --no-daemon clean assembleDebug lintDebug
-
-      - name: Vérifier RVM dans l'APK
+      - name: Vérifier le moteur stable
         run: |
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/rvm_mobilenetv3.ncnn.param"
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/rvm_mobilenetv3.ncnn.bin"
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/arm64-v8a/librvmncnn.so"
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/armeabi-v7a/librvmncnn.so"
-          if unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "paddle_lite"; then
-            echo "ERREUR: Paddle Lite est encore présent dans l'APK"
+          grep -q "Segmentation.getClient" app/src/main/java/com/chasmet/fondvertstudio/SegmentationEngine.java
+          if grep -R -E "RvmNcnnEngine|PpHumanSegEngine|publishProcessedForeground" app/src/main/java/com/chasmet/fondvertstudio; then
+            echo "ERREUR : un ancien pipeline expérimental est encore actif"
             exit 1
           fi
-          echo "APK stable: RVM présent, Paddle Lite absent"
+
+      - name: Compiler et tester l'APK
+        run: ./gradlew --no-daemon clean assembleDebug lintDebug
+
+      - name: Vérifier l'APK final
+        run: |
+          if unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -E "librvmncnn|rvm_mobilenetv3|paddle_lite|pp_humanseg"; then
+            echo "ERREUR : moteur natif expérimental encore embarqué"
+            exit 1
+          fi
+          echo "APK propre : CameraX + ML Kit uniquement pour le détourage"
 
       - name: Nommer l'APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.9.2-Android16-Stable.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.10.0-Moteur-Stable.apk
 
       - name: Publier l'APK
         uses: actions/upload-artifact@v4
         with:
-          name: Fond-Vert-Studio-v1.9.2-Android16-Stable
-          path: Fond-Vert-Studio-v1.9.2-Android16-Stable.apk
+          name: Fond-Vert-Studio-v1.10.0-Moteur-Stable
+          path: Fond-Vert-Studio-v1.10.0-Moteur-Stable.apk
           if-no-files-found: error
           retention-days: 30
