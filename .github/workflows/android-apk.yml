@@ -30,12 +30,15 @@ jobs:
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" "cmake;3.22.1" >/dev/null
 
-      - name: Inspecter les binaires officiels Paddle Lite 2.13
+      - name: Inspecter Paddle Lite Android 2.13
         run: |
-          curl -fsSL "https://api.github.com/repos/PaddlePaddle/Paddle-Lite/releases/tags/v2.13-rc" \
-            | jq -r '.assets[].name' \
-            | grep -E '(^opt_linux_x86$|android.*(armv7|armv8|java))' \
-            | tee /tmp/paddle-assets.txt
+          set -e
+          curl -fL "https://github.com/PaddlePaddle/Paddle-Lite/releases/download/v2.13-rc/inference_lite_lib.android.armv8.clang.c++_shared.tar.gz" -o /tmp/paddle-armv8.tar.gz
+          echo "=== contenu Java/JNI armv8 ==="
+          tar tzf /tmp/paddle-armv8.tar.gz | grep -E 'PaddlePredictor.jar|libpaddle_lite_jni.so|/java/' | head -80 || true
+          curl -fL "https://github.com/PaddlePaddle/Paddle-Lite/releases/download/v2.13-rc/inference_lite_lib.android.armv7.clang.c++_shared.tar.gz" -o /tmp/paddle-armv7.tar.gz
+          echo "=== contenu Java/JNI armv7 ==="
+          tar tzf /tmp/paddle-armv7.tar.gz | grep -E 'PaddlePredictor.jar|libpaddle_lite_jni.so|/java/' | head -80 || true
 
       - name: Préparer Gradle
         uses: gradle/actions/setup-gradle@v4
