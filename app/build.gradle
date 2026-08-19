@@ -2,6 +2,41 @@ plugins {
     id 'com.android.application'
 }
 
+def modnetAssetsDir = file("$buildDir/generated/modnetAssets")
+def modnetModelFile = file("$modnetAssetsDir/modnet_photographic.onnx")
+def modnetModelUrl = 'https://github.com/yakhyo/modnet/releases/download/weights/modnet_photographic.onnx'
+
+tasks.register('prepareModNetModel') {
+    outputs.file(modnetModelFile)
+    doLast {
+        if (!modnetAssetsDir.exists() && !modnetAssetsDir.mkdirs()) {
+            throw new GradleException('Impossible de créer le dossier MODNet')
+        }
+        if (!modnetModelFile.exists() || modnetModelFile.length() < 20_000_000L) {
+            println 'Téléchargement du modèle MODNet local (~25 Mo)…'
+            if (modnetModelFile.exists()) modnetModelFile.delete()
+            try {
+                new URL(modnetModelUrl).withInputStream { input ->
+                    modnetModelFile.withOutputStream { output ->
+                        byte[] buffer = new byte[256 * 1024]
+                        int count
+                        while ((count = input.read(buffer)) != -1) {
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                }
+            } catch (Exception error) {
+                if (modnetModelFile.exists()) modnetModelFile.delete()
+                throw new GradleException('Échec du téléchargement MODNet : ' + error.message, error)
+            }
+        }
+        if (!modnetModelFile.isFile() || modnetModelFile.length() < 20_000_000L) {
+            throw new GradleException('Le modèle MODNet téléchargé est incomplet')
+        }
+        println "MODNet prêt : ${String.format('%.1f', modnetModelFile.length() / 1024d / 1024d)} Mo"
+    }
+}
+
 android {
     namespace 'com.chasmet.fondvertstudio'
     compileSdk 34
@@ -10,11 +45,15 @@ android {
         applicationId 'com.chasmet.fondvertstudio'
         minSdk 21
         targetSdk 34
-        versionCode 10
-        versionName '1.6.0'
+        versionCode 11
+        versionName '1.7.0'
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         vectorDrawables.useSupportLibrary = true
+    }
+
+    sourceSets {
+        main.assets.srcDir modnetAssetsDir
     }
 
     buildTypes {
@@ -37,6 +76,10 @@ android {
     }
 }
 
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('prepareModNetModel')
+}
+
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
@@ -48,6 +91,7 @@ dependencies {
     implementation "androidx.camera:camera-lifecycle:${cameraxVersion}"
     implementation "androidx.camera:camera-video:${cameraxVersion}"
 
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0'
     implementation 'com.google.mlkit:segmentation-selfie:16.0.0-beta6'
     implementation 'androidx.work:work-runtime:2.9.1'
 }
