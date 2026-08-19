@@ -2,6 +2,8 @@
 
 Application Android native pour filmer une personne détourée devant un décor image ou vidéo, sans serveur payant.
 
+Version 1.4.0 : calque sujet tactile et contours stabilisés pour les mouvements.
+
 ## Fonctions
 
 - enregistrement caméra avant ou arrière en Full HD, avec aperçu léger et fluide ;
