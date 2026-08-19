@@ -18,6 +18,8 @@ import androidx.camera.core.ImageProxy;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.IntBuffer;
 
 public final class BitmapUtils {
     private BitmapUtils() {
@@ -32,8 +34,26 @@ public final class BitmapUtils {
         int pixelStride = plane.getPixelStride();
         int[] pixels = new int[width * height];
 
+        if (pixelStride == 4) {
+            ByteBuffer ordered = buffer.duplicate().order(ByteOrder.BIG_ENDIAN);
+            int baseOffset = ordered.position();
+            if (rowStride == width * 4 && ordered.remaining() >= width * height * 4) {
+                ordered.asIntBuffer().get(pixels, 0, pixels.length);
+            } else {
+                for (int y = 0; y < height; y++) {
+                    ByteBuffer row = ordered.duplicate().order(ByteOrder.BIG_ENDIAN);
+                    row.position(baseOffset + y * rowStride);
+                    row.limit(baseOffset + y * rowStride + width * 4);
+                    IntBuffer ints = row.slice().order(ByteOrder.BIG_ENDIAN).asIntBuffer();
+                    ints.get(pixels, y * width, width);
+                }
+            }
+            return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+        }
+
+        int baseOffset = buffer.position();
         for (int y = 0; y < height; y++) {
-            int rowOffset = y * rowStride;
+            int rowOffset = baseOffset + y * rowStride;
             int targetOffset = y * width;
             for (int x = 0; x < width; x++) {
                 int offset = rowOffset + x * pixelStride;
