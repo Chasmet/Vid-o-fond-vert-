@@ -138,8 +138,9 @@ public final class SegmentationEngine implements AutoCloseable {
                     streamBusy.set(false);
                     mainHandler.post(() -> callback.onResult(result));
                     return;
-                } catch (Exception ignored) {
-                    // Une erreur de frame ne condamne pas le moteur : ML Kit assure ce frame.
+                } catch (Throwable ignored) {
+                    disableModNetAfterNativeFailure();
+                    // ML Kit prend immédiatement le relais sur ce frame.
                 }
             }
             processStreamWithMlKit(bitmap, callback);
@@ -200,8 +201,8 @@ public final class SegmentationEngine implements AutoCloseable {
                             matte.width, matte.height);
                     mainHandler.post(() -> callback.onResult(result));
                     return;
-                } catch (Exception ignored) {
-                    // Fallback ci-dessous.
+                } catch (Throwable ignored) {
+                    disableModNetAfterNativeFailure();
                 }
             }
             processStillWithMlKit(bitmap, callback);
@@ -244,8 +245,8 @@ public final class SegmentationEngine implements AutoCloseable {
                 backendName = "MODNet local · export 512";
                 return new Result(bitmap, null, alphaMask, stable,
                         matte.width, matte.height);
-            } catch (Exception ignored) {
-                // Le rendu continue avec le moteur de secours plutôt que d'échouer.
+            } catch (Throwable ignored) {
+                disableModNetAfterNativeFailure();
             }
         }
 
@@ -271,10 +272,22 @@ public final class SegmentationEngine implements AutoCloseable {
             modNet = new ModNetEngine(appContext);
             backendName = "MODNet local";
             return modNet;
-        } catch (Exception error) {
-            modNetDisabled = true;
-            backendName = "ML Kit secours";
+        } catch (Throwable error) {
+            disableModNetAfterNativeFailure();
             return null;
+        }
+    }
+
+    private synchronized void disableModNetAfterNativeFailure() {
+        modNetDisabled = true;
+        backendName = "ML Kit secours";
+        ModNetEngine engine = modNet;
+        modNet = null;
+        if (engine != null) {
+            try {
+                engine.close();
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -323,7 +336,6 @@ public final class SegmentationEngine implements AutoCloseable {
                 else if (difference < 0.07f) historyWeight = export ? 0.35f : 0.27f;
                 else if (difference < 0.15f) historyWeight = export ? 0.18f : 0.13f;
                 else historyWeight = 0.025f;
-                // Le fond réapparaît vite après le passage d'un bras, sans silhouette fantôme.
                 if (value < history && difference > 0.07f) historyWeight *= 0.45f;
                 stable[i] = clamp(value * (1f - historyWeight) + history * historyWeight);
             }
@@ -395,7 +407,13 @@ public final class SegmentationEngine implements AutoCloseable {
         streamSegmenter.close();
         stillSegmenter.close();
         ModNetEngine engine = modNet;
-        if (engine != null) engine.close();
+        modNet = null;
+        if (engine != null) {
+            try {
+                engine.close();
+            } catch (Throwable ignored) {
+            }
+        }
         resultExecutor.shutdownNow();
     }
 }
