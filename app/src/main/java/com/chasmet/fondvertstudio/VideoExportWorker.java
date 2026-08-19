@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.Build;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
 import androidx.work.Data;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
@@ -173,6 +174,7 @@ public final class VideoExportWorker extends Worker {
         return Result.failure(new Data.Builder().putString(KEY_ERROR, message).build());
     }
 
+    @RequiresApi(Build.VERSION_CODES.P)
     private int encodeIndexedFrames(MediaMetadataRetriever retriever,
                                     int sourceFrameCount, int targetFrameCount,
                                     int frameRate, int rotation, int metadataWidth,
@@ -384,6 +386,7 @@ public final class VideoExportWorker extends Worker {
             return null;
         }
 
+        @RequiresApi(Build.VERSION_CODES.P)
         private Bitmap indexedFrame(long timeUs) {
             if (!indexedFramesEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
                 return null;
