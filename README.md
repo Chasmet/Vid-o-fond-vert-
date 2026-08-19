@@ -2,7 +2,7 @@
 
 Application Android native pour filmer une personne détourée devant un décor image ou vidéo, sans serveur payant.
 
-Version 1.4.0 : calque sujet tactile et contours stabilisés pour les mouvements.
+Version 1.4.1 : calque sujet tactile, contours stabilisés et détourage garanti dans le MP4 final.
 
 ## Fonctions
 
@@ -15,6 +15,7 @@ Version 1.4.0 : calque sujet tactile et contours stabilisés pour les mouvements
 - trois profils de contour : HD net, cheveux et doux, avec stabilisation temporelle adaptative ;
 - gros bouton d’enregistrement avec chronomètre et audio ;
 - export MP4 H.264 jusqu’en 1080p à 30 images/s et haut débit ;
+- bitmap caméra réellement détouré avant composition : le masque reste présent dans la vidéo sauvegardée, même sur les téléphones qui ignorent certains calques graphiques pendant l’export ;
 - export PNG réellement transparent ;
 - traitement local : aucun compte, aucune clé API et aucun envoi vers un serveur.
 

@@ -140,18 +140,22 @@ public final class VideoExportWorker extends Worker {
             backgroundProvider = new BackgroundProvider(context, backgroundType,
                     backgroundUri, backgroundColor, Math.max(width, height));
             encoder = new H264FrameEncoder(videoOnly, width, height, frameRate);
+            BitmapUtils.AlphaMaskFlattener maskFlattener =
+                    new BitmapUtils.AlphaMaskFlattener(width, height);
 
             int encodedFrames;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && sourceFrameCount > 0) {
                 encodedFrames = encodeIndexedFrames(sourceRetriever, sourceFrameCount,
                         frameCount, frameRate, rotation, metadataWidth, metadataHeight,
                         mirrorSource, width, height, threshold, softness,
-                        segmenter, backgroundProvider, transformTimeline, encoder);
+                        segmenter, backgroundProvider, transformTimeline,
+                        maskFlattener, encoder);
             } else {
                 encodedFrames = encodeTimedFrames(sourceRetriever, frameCount, frameRate,
                         durationUs, rotation, metadataWidth, metadataHeight, mirrorSource,
                         width, height, threshold, softness,
-                        segmenter, backgroundProvider, transformTimeline, encoder);
+                        segmenter, backgroundProvider, transformTimeline,
+                        maskFlattener, encoder);
             }
             if (encodedFrames == 0) throw new IOException("Aucune image vidéo décodable");
             encoder.finish();
@@ -211,6 +215,7 @@ public final class VideoExportWorker extends Worker {
                                     SegmentationEngine segmenter,
                                     BackgroundProvider backgroundProvider,
                                     SubjectTransformTimeline transformTimeline,
+                                    BitmapUtils.AlphaMaskFlattener maskFlattener,
                                     H264FrameEncoder encoder) throws Exception {
         MediaMetadataRetriever.BitmapParams bitmapParams =
                 new MediaMetadataRetriever.BitmapParams();
@@ -236,7 +241,8 @@ public final class VideoExportWorker extends Worker {
                 long timeUs = outputIndex * 1_000_000L / frameRate;
                 encodeOneFrame(frame, timeUs, rotation, metadataWidth, metadataHeight,
                         mirrorSource, width, height, threshold, softness,
-                        segmenter, backgroundProvider, transformTimeline, encoder);
+                        segmenter, backgroundProvider, transformTimeline,
+                        maskFlattener, encoder);
                 outputIndex++;
                 nextSourceIndex = outputIndex * sourceStep;
             }
@@ -256,6 +262,7 @@ public final class VideoExportWorker extends Worker {
                                   SegmentationEngine segmenter,
                                   BackgroundProvider backgroundProvider,
                                   SubjectTransformTimeline transformTimeline,
+                                  BitmapUtils.AlphaMaskFlattener maskFlattener,
                                   H264FrameEncoder encoder) throws Exception {
         int encoded = 0;
         for (int frameIndex = 0; frameIndex < frameCount; frameIndex++) {
@@ -266,7 +273,8 @@ public final class VideoExportWorker extends Worker {
             if (frame != null) {
                 encodeOneFrame(frame, timeUs, rotation, metadataWidth, metadataHeight,
                         mirrorSource, width, height, threshold, softness,
-                        segmenter, backgroundProvider, transformTimeline, encoder);
+                        segmenter, backgroundProvider, transformTimeline,
+                        maskFlattener, encoder);
                 encoded++;
             }
             if (frameIndex % 3 == 0 || frameIndex == frameCount - 1) {
@@ -285,6 +293,7 @@ public final class VideoExportWorker extends Worker {
                                        SegmentationEngine segmenter,
                                        BackgroundProvider backgroundProvider,
                                        SubjectTransformTimeline transformTimeline,
+                                       BitmapUtils.AlphaMaskFlattener maskFlattener,
                                        H264FrameEncoder encoder) throws Exception {
         frame = orientFrame(frame, rotation, metadataWidth, metadataHeight);
         if (mirrorSource) frame = BitmapUtils.rotateAndMirror(frame, 0, true);
@@ -295,12 +304,16 @@ public final class VideoExportWorker extends Worker {
                 prepared, threshold, softness);
         Bitmap background = backgroundProvider.frameAt(timeUs, width, height);
         SubjectTransformTimeline.Transform transform = transformTimeline.at(timeUs);
-        Bitmap composite = BitmapUtils.compositeWithMask(segmented.source,
-                segmented.alphaMask, background, backgroundProvider.getColor(),
-                width, height, transform.scale, transform.centerX, transform.centerY);
+        // Le détourage est aplati avant la composition. Le MP4 ne peut ainsi jamais récupérer
+        // la couche caméra brute si le téléphone ignore un Xfermode pendant l'encodage.
+        Bitmap cutout = maskFlattener.flatten(segmented.source, segmented.alphaMask);
+        Bitmap composite = BitmapUtils.composite(cutout, background,
+                backgroundProvider.getColor(), width, height,
+                transform.scale, transform.centerX, transform.centerY);
         encoder.encode(composite, timeUs);
 
         composite.recycle();
+        cutout.recycle();
         segmented.alphaMask.recycle();
         segmented.source.recycle();
         if (background != null) background.recycle();

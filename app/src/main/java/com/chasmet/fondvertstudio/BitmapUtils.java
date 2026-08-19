@@ -8,8 +8,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.net.Uri;
@@ -193,6 +191,53 @@ public final class BitmapUtils {
         return output;
     }
 
+    /**
+     * Fabrique un véritable bitmap ARGB détouré avant l'étape d'encodage.
+     *
+     * Le masque est d'abord agrandi par Skia (natif), puis son alpha est inscrit dans chaque
+     * pixel caméra. L'encodeur ne reçoit donc jamais un rectangle caméra brut accompagné d'une
+     * opération DST_IN séparée, opération que certains téléphones omettent pendant l'export.
+     */
+    public static final class AlphaMaskFlattener {
+        private final int width;
+        private final int height;
+        private final int[] pixels;
+        private final int[] maskPixels;
+
+        public AlphaMaskFlattener(int width, int height) {
+            this.width = width;
+            this.height = height;
+            pixels = new int[width * height];
+            maskPixels = new int[width * height];
+        }
+
+        public Bitmap flatten(Bitmap source, Bitmap alphaMask) {
+            if (source == null || source.isRecycled() || alphaMask == null
+                    || alphaMask.isRecycled() || source.getWidth() != width
+                    || source.getHeight() != height) {
+                throw new IllegalArgumentException("Image ou masque invalide");
+            }
+            Bitmap fullSizeMask = alphaMask;
+            if (alphaMask.getWidth() != width || alphaMask.getHeight() != height) {
+                fullSizeMask = Bitmap.createScaledBitmap(alphaMask, width, height, true);
+            }
+
+            source.getPixels(pixels, 0, width, 0, 0, width, height);
+            fullSizeMask.getPixels(maskPixels, 0, width, 0, 0, width, height);
+            for (int index = 0; index < pixels.length; index++) {
+                int sourceAlpha = pixels[index] >>> 24;
+                int maskAlpha = maskPixels[index] >>> 24;
+                int outputAlpha = (sourceAlpha * maskAlpha + 127) / 255;
+                pixels[index] = outputAlpha == 0 ? 0
+                        : (pixels[index] & 0x00FFFFFF) | (outputAlpha << 24);
+            }
+            if (fullSizeMask != alphaMask) {
+                fullSizeMask.recycle();
+            }
+            return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+        }
+    }
+
     private static int sharpenPixel(int[] pixels, int width, int x, int y, int center) {
         int left = pixels[y * width + x - 1];
         int right = pixels[y * width + x + 1];
@@ -280,50 +325,17 @@ public final class BitmapUtils {
 
     public static Bitmap composite(Bitmap cutout, Bitmap background, int color,
                                    int targetWidth, int targetHeight) {
-        Bitmap output = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(output);
-        if (background != null) {
-            if (background.getWidth() == targetWidth && background.getHeight() == targetHeight) {
-                canvas.drawBitmap(background, 0f, 0f, null);
-            } else {
-                Bitmap cropped = centerCrop(background, targetWidth, targetHeight);
-                canvas.drawBitmap(cropped, 0f, 0f, null);
-                cropped.recycle();
-            }
-        } else {
-            canvas.drawColor(color);
-        }
-        if (cutout.getWidth() == targetWidth && cutout.getHeight() == targetHeight) {
-            canvas.drawBitmap(cutout, 0f, 0f, null);
-        } else {
-            Bitmap subject = centerCrop(cutout, targetWidth, targetHeight);
-            canvas.drawBitmap(subject, 0f, 0f, null);
-            subject.recycle();
-        }
-        return output;
-    }
-
-    /**
-     * Composite le masque basse résolution avec Canvas natif. Cela évite deux
-     * millions d'interpolations Java par image lors d'un export 1080p.
-     */
-    public static Bitmap compositeWithMask(Bitmap subject, Bitmap alphaMask,
-                                           Bitmap background, int color,
-                                           int targetWidth, int targetHeight) {
-        return compositeWithMask(subject, alphaMask, background, color,
-                targetWidth, targetHeight,
+        return composite(cutout, background, color, targetWidth, targetHeight,
                 SubjectTransformTimeline.DEFAULT_SCALE,
                 SubjectTransformTimeline.DEFAULT_CENTER_X,
                 SubjectTransformTimeline.DEFAULT_CENTER_Y);
     }
 
-    public static Bitmap compositeWithMask(Bitmap subject, Bitmap alphaMask,
-                                           Bitmap background, int color,
-                                           int targetWidth, int targetHeight,
-                                           float subjectScale, float centerX,
-                                           float centerY) {
-        Bitmap output = Bitmap.createBitmap(targetWidth, targetHeight,
-                Bitmap.Config.ARGB_8888);
+    /** Composite uniquement un bitmap dont l'alpha est déjà aplati et vérifiable. */
+    public static Bitmap composite(Bitmap cutout, Bitmap background, int color,
+                                   int targetWidth, int targetHeight,
+                                   float subjectScale, float centerX, float centerY) {
+        Bitmap output = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(output);
         Paint filtered = new Paint(Paint.ANTI_ALIAS_FLAG
                 | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
@@ -345,14 +357,7 @@ public final class BitmapUtils {
                 centerPixelsY - transformedHeight * 0.5f,
                 centerPixelsX + transformedWidth * 0.5f,
                 centerPixelsY + transformedHeight * 0.5f);
-
-        int layer = canvas.saveLayer(target, null);
-        canvas.drawBitmap(subject, null, subjectTarget, filtered);
-        Paint maskPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        maskPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
-        canvas.drawBitmap(alphaMask, null, subjectTarget, maskPaint);
-        maskPaint.setXfermode(null);
-        canvas.restoreToCount(layer);
+        canvas.drawBitmap(cutout, null, subjectTarget, filtered);
         return output;
     }
 
