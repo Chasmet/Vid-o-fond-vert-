@@ -33,6 +33,8 @@ public final class VideoExportWorker extends Worker {
     public static final String KEY_TRANSFORM_SCALE = "transform_scale";
     public static final String KEY_TRANSFORM_CENTER_X = "transform_center_x";
     public static final String KEY_TRANSFORM_CENTER_Y = "transform_center_y";
+    public static final String KEY_EXTERNAL_AUDIO_URI = "external_audio_uri";
+    public static final String KEY_EXTERNAL_AUDIO_START_MS = "external_audio_start_ms";
     public static final String KEY_PROGRESS = "progress";
     public static final String KEY_OUTPUT_URI = "output_uri";
     public static final String KEY_ERROR = "error";
@@ -46,9 +48,7 @@ public final class VideoExportWorker extends Worker {
     @Override
     public Result doWork() {
         String sourceValue = getInputData().getString(KEY_SOURCE_URI);
-        if (sourceValue == null) {
-            return failure("Vidéo source absente");
-        }
+        if (sourceValue == null) return failure("Vidéo source absente");
         Uri sourceUri = Uri.parse(sourceValue);
         String typeValue = getInputData().getString(KEY_BACKGROUND_TYPE);
         BackgroundSpec.Type backgroundType;
@@ -75,13 +75,17 @@ public final class VideoExportWorker extends Worker {
         float fallbackCenterY = getInputData().getFloat(KEY_TRANSFORM_CENTER_Y,
                 SubjectTransformTimeline.DEFAULT_CENTER_Y);
         String transformPath = getInputData().getString(KEY_TRANSFORM_PATH);
+        String externalAudioValue = getInputData().getString(KEY_EXTERNAL_AUDIO_URI);
+        Uri externalAudioUri = externalAudioValue == null ? null : Uri.parse(externalAudioValue);
+        long externalAudioStartUs = Math.max(0L,
+                getInputData().getLong(KEY_EXTERNAL_AUDIO_START_MS, 0L)) * 1000L;
+
         File transformFile = transformPath == null ? null : new File(transformPath);
         SubjectTransformTimeline transformTimeline = new SubjectTransformTimeline();
         if (transformFile != null && transformFile.isFile()) {
             try {
                 transformTimeline = SubjectTransformTimeline.read(transformFile);
             } catch (IOException ignored) {
-                // Repli sur la dernière transformation reçue avec la tâche.
             }
         }
         if (transformTimeline.isEmpty()) {
@@ -105,9 +109,7 @@ public final class VideoExportWorker extends Worker {
             setDataSource(sourceRetriever, context, sourceUri);
             long durationMs = readLong(sourceRetriever,
                     MediaMetadataRetriever.METADATA_KEY_DURATION, 0L);
-            if (durationMs <= 0L) {
-                throw new IOException("Durée vidéo invalide");
-            }
+            if (durationMs <= 0L) throw new IOException("Durée vidéo invalide");
             int metadataWidth = readInt(sourceRetriever,
                     MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH, 720);
             int metadataHeight = readInt(sourceRetriever,
@@ -127,12 +129,10 @@ public final class VideoExportWorker extends Worker {
             int height = outputSize[1];
             int sourceFrameCount = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
                     ? readInt(sourceRetriever,
-                    MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT, 0)
-                    : 0;
+                    MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT, 0) : 0;
             double detectedFrameRate = sourceFrameCount > 0
                     ? sourceFrameCount * 1000d / durationMs : 30d;
-            int frameRate = Math.max(15, Math.min(30,
-                    (int) Math.round(detectedFrameRate)));
+            int frameRate = Math.max(15, Math.min(30, (int) Math.round(detectedFrameRate)));
             int frameCount = Math.max(1, (int) Math.ceil(durationMs * frameRate / 1000d));
             long durationUs = durationMs * 1000L;
 
@@ -163,8 +163,15 @@ public final class VideoExportWorker extends Worker {
             encoder = null;
             setProgressAsync(new Data.Builder().putInt(KEY_PROGRESS, 97).build());
 
-            MuxerUtils.addSourceAudio(context, videoOnly, sourceUri, finalVideo, durationUs);
-            String name = String.format(Locale.US, "FondVert_%d.mp4",
+            if (externalAudioUri != null) {
+                MuxerUtils.addAudio(context, videoOnly, externalAudioUri, finalVideo,
+                        durationUs, externalAudioStartUs);
+            } else {
+                MuxerUtils.addSourceAudio(context, videoOnly, sourceUri, finalVideo, durationUs);
+            }
+
+            String name = String.format(Locale.US, externalAudioUri == null
+                            ? "FondVert_%d.mp4" : "ClipMusique_%d.mp4",
                     System.currentTimeMillis());
             Uri outputUri = MediaStoreSaver.saveVideo(context, finalVideo, name);
             setProgressAsync(new Data.Builder().putInt(KEY_PROGRESS, 100).build());
@@ -178,27 +185,12 @@ public final class VideoExportWorker extends Worker {
                 sourceRetriever.release();
             } catch (IOException ignored) {
             }
-            if (backgroundProvider != null) {
-                backgroundProvider.close();
-            }
-            if (segmenter != null) {
-                segmenter.close();
-            }
-            if (encoder != null) {
-                encoder.close();
-            }
-            if (videoOnly.exists()) {
-                //noinspection ResultOfMethodCallIgnored
-                videoOnly.delete();
-            }
-            if (finalVideo.exists()) {
-                //noinspection ResultOfMethodCallIgnored
-                finalVideo.delete();
-            }
-            if (transformFile != null && transformFile.exists()) {
-                //noinspection ResultOfMethodCallIgnored
-                transformFile.delete();
-            }
+            if (backgroundProvider != null) backgroundProvider.close();
+            if (segmenter != null) segmenter.close();
+            if (encoder != null) encoder.close();
+            if (videoOnly.exists()) videoOnly.delete();
+            if (finalVideo.exists()) finalVideo.delete();
+            if (transformFile != null && transformFile.exists()) transformFile.delete();
         }
     }
 
@@ -304,8 +296,6 @@ public final class VideoExportWorker extends Worker {
                 prepared, threshold, softness);
         Bitmap background = backgroundProvider.frameAt(timeUs, width, height);
         SubjectTransformTimeline.Transform transform = transformTimeline.at(timeUs);
-        // Le détourage est aplati avant la composition. Le MP4 ne peut ainsi jamais récupérer
-        // la couche caméra brute si le téléphone ignore un Xfermode pendant l'encodage.
         Bitmap cutout = maskFlattener.flatten(segmented.source, segmented.alphaMask);
         Bitmap composite = BitmapUtils.composite(cutout, background,
                 backgroundProvider.getColor(), width, height,
@@ -326,19 +316,14 @@ public final class VideoExportWorker extends Worker {
         if ((rotation == 90 || rotation == 270) && expectedPortrait != actualPortrait) {
             return BitmapUtils.rotateAndMirror(bitmap, rotation, false);
         }
-        if (rotation == 180) {
-            return BitmapUtils.rotateAndMirror(bitmap, 180, false);
-        }
+        if (rotation == 180) return BitmapUtils.rotateAndMirror(bitmap, 180, false);
         return bitmap;
     }
 
     private static void setDataSource(MediaMetadataRetriever retriever,
                                       Context context, Uri uri) {
-        if ("file".equals(uri.getScheme())) {
-            retriever.setDataSource(uri.getPath());
-        } else {
-            retriever.setDataSource(context, uri);
-        }
+        if ("file".equals(uri.getScheme())) retriever.setDataSource(uri.getPath());
+        else retriever.setDataSource(context, uri);
     }
 
     private static int readInt(MediaMetadataRetriever retriever, int key, int fallback) {
@@ -432,11 +417,9 @@ public final class VideoExportWorker extends Worker {
             return null;
         }
 
-        @SuppressLint("NewApi") // Appel protégé par le test SDK au début de la méthode.
+        @SuppressLint("NewApi")
         private Bitmap indexedFrame(long timeUs) {
-            if (!indexedFramesEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-                return null;
-            }
+            if (!indexedFramesEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null;
             int targetIndex = Math.max(0, Math.min(videoFrameCount - 1,
                     (int) Math.floor(timeUs * videoFrameRate / 1_000_000d)));
             if (cachedStart >= 0 && targetIndex >= cachedStart
@@ -449,8 +432,7 @@ public final class VideoExportWorker extends Worker {
                 MediaMetadataRetriever.BitmapParams params =
                         new MediaMetadataRetriever.BitmapParams();
                 params.setPreferredConfig(Bitmap.Config.ARGB_8888);
-                cachedFrames.addAll(videoRetriever.getFramesAtIndex(
-                        targetIndex, count, params));
+                cachedFrames.addAll(videoRetriever.getFramesAtIndex(targetIndex, count, params));
                 cachedStart = targetIndex;
                 return cachedFrames.isEmpty() ? null : cachedFrames.get(0);
             } catch (Exception ignored) {
