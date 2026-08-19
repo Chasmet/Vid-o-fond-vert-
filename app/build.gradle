@@ -25,9 +25,11 @@ def paddleLiteTar = file("$generatedHumanSegRoot/paddle_lite_libs_v2_10_rc.tar.g
 def paddleLiteExtractDir = file("$generatedHumanSegRoot/paddle-runtime")
 def paddleJarFile = file("$generatedHumanSegRoot/libs/PaddlePredictor.jar")
 def paddleJniDir = file("$generatedHumanSegRoot/jniLibs")
+def paddleOptFile = file("$generatedHumanSegRoot/opt_linux_x86")
 
 def humanSegUrl = 'https://paddleseg.bj.bcebos.com/dygraph/pp_humanseg_v2/human_pp_humansegv2_lite_192x192_inference_model_with_softmax.zip'
 def paddleLiteUrl = 'https://paddlelite-demo.bj.bcebos.com/libs/android/paddle_lite_libs_v2_10_rc.tar.gz'
+def paddleOptUrl = 'https://github.com/PaddlePaddle/Paddle-Lite/releases/download/v2.10-rc/opt_linux_x86'
 
 def downloadTo = { String url, File target ->
     target.parentFile.mkdirs()
@@ -90,7 +92,7 @@ tasks.register('prepareRvmNativeDependencies') {
     dependsOn tasks.named('prepareRvmAssets'), tasks.named('prepareNcnnSdk')
 }
 
-// Runtime Java officiel Paddle Lite. Rien n'est téléchargé sur le téléphone.
+// Runtime Java officiel Paddle Lite 2.10-rc. Rien n'est téléchargé sur le téléphone.
 tasks.register('preparePaddleLiteRuntime') {
     outputs.files(paddleJarFile,
             file("$paddleJniDir/arm64-v8a/libpaddle_lite_jni.so"),
@@ -137,7 +139,7 @@ tasks.register('preparePaddleLiteRuntime') {
     }
 }
 
-// Télécharge le modèle officiel PaddleSeg puis le convertit en .nb mobile avec Paddle Lite 2.10.
+// Modèle officiel PaddleSeg converti avec l'outil natif officiel Paddle Lite 2.10-rc.
 tasks.register('prepareHumanSegModel') {
     outputs.file(humanSegNbFile)
     doLast {
@@ -146,6 +148,12 @@ tasks.register('prepareHumanSegModel') {
         if (!humanSegZipFile.isFile() || humanSegZipFile.length() < 500_000L) {
             downloadTo(humanSegUrl, humanSegZipFile)
         }
+        if (!paddleOptFile.isFile() || paddleOptFile.length() < 1_000_000L) {
+            println 'Téléchargement de Paddle Lite opt 2.10-rc…'
+            downloadTo(paddleOptUrl, paddleOptFile)
+        }
+        paddleOptFile.setExecutable(true)
+
         delete humanSegExtractDir
         humanSegExtractDir.mkdirs()
         copy {
@@ -162,17 +170,12 @@ tasks.register('prepareHumanSegModel') {
         humanSegModelDir.mkdirs()
         File optimizeBase = file("$humanSegModelDir/model")
         exec {
-            commandLine 'bash', '-lc', """
-                set -e
-                python3 -m pip install --user --disable-pip-version-check 'paddlelite==2.10'
-                export PATH=\"\$HOME/.local/bin:\$PATH\"
-                paddle_lite_opt \\
-                  --model_file='${pdmodel.absolutePath}' \\
-                  --param_file='${pdiparams.absolutePath}' \\
-                  --optimize_out='${optimizeBase.absolutePath}' \\
-                  --valid_targets=arm \\
-                  --optimize_out_type=naive_buffer
-            """.stripIndent()
+            commandLine paddleOptFile.absolutePath,
+                    "--model_file=${pdmodel.absolutePath}",
+                    "--param_file=${pdiparams.absolutePath}",
+                    "--optimize_out=${optimizeBase.absolutePath}",
+                    '--valid_targets=arm',
+                    '--optimize_out_type=naive_buffer'
         }
         if (!humanSegNbFile.isFile() || humanSegNbFile.length() < 500_000L) {
             throw new GradleException('Conversion PP-HumanSeg en model.nb échouée')
