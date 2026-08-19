@@ -8,6 +8,8 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.net.Uri;
@@ -297,6 +299,35 @@ public final class BitmapUtils {
             canvas.drawBitmap(subject, 0f, 0f, null);
             subject.recycle();
         }
+        return output;
+    }
+
+    /**
+     * Composite le masque basse résolution avec Canvas natif. Cela évite deux
+     * millions d'interpolations Java par image lors d'un export 1080p.
+     */
+    public static Bitmap compositeWithMask(Bitmap subject, Bitmap alphaMask,
+                                           Bitmap background, int color,
+                                           int targetWidth, int targetHeight) {
+        Bitmap output = Bitmap.createBitmap(targetWidth, targetHeight,
+                Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(output);
+        Paint filtered = new Paint(Paint.ANTI_ALIAS_FLAG
+                | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+        RectF target = new RectF(0f, 0f, targetWidth, targetHeight);
+        if (background != null) {
+            canvas.drawBitmap(background, null, target, filtered);
+        } else {
+            canvas.drawColor(color);
+        }
+
+        int layer = canvas.saveLayer(target, null);
+        canvas.drawBitmap(subject, null, target, filtered);
+        Paint maskPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        maskPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
+        canvas.drawBitmap(alphaMask, null, target, maskPaint);
+        maskPaint.setXfermode(null);
+        canvas.restoreToCount(layer);
         return output;
     }
 

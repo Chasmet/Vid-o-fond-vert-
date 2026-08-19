@@ -264,12 +264,13 @@ public final class VideoExportWorker extends Worker {
         SegmentationEngine.Result segmented = segmenter.processStillBlocking(
                 prepared, threshold, softness);
         Bitmap background = backgroundProvider.frameAt(timeUs, width, height);
-        Bitmap composite = BitmapUtils.composite(segmented.cutout, background,
-                backgroundProvider.getColor(), width, height);
+        Bitmap composite = BitmapUtils.compositeWithMask(segmented.source,
+                segmented.alphaMask, background, backgroundProvider.getColor(),
+                width, height);
         encoder.encode(composite, timeUs);
 
         composite.recycle();
-        segmented.cutout.recycle();
+        segmented.alphaMask.recycle();
         segmented.source.recycle();
         if (background != null) background.recycle();
     }

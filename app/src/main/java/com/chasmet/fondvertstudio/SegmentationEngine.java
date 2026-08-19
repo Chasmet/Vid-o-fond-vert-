@@ -147,9 +147,9 @@ public final class SegmentationEngine implements AutoCloseable {
                 bitmap, INFERENCE_MAX_DIMENSION);
         try {
             SegmentationMask mask = Tasks.await(
-                    streamSegmenter.process(InputImage.fromBitmap(inferenceBitmap, 0)),
+                    stillSegmenter.process(InputImage.fromBitmap(inferenceBitmap, 0)),
                     60, TimeUnit.SECONDS);
-            return makeResult(bitmap, mask, localThreshold, localSoftness, true);
+            return makeResult(bitmap, mask, localThreshold, localSoftness, false);
         } finally {
             if (inferenceBitmap != bitmap && !inferenceBitmap.isRecycled()) {
                 inferenceBitmap.recycle();
