@@ -23,10 +23,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Détourage vidéo hybride.
- * RVM MobileNetV3 + ncnn est prioritaire : ses quatre états récurrents suivent le sujet entre
- * les images et évitent les disparitions brutales observées avec les modèles image-par-image.
- * ML Kit reste uniquement un secours de compatibilité.
+ * Détourage vidéo hybride haute qualité.
+ *
+ * RVM fournit la continuité temporelle, le foreground RGB réellement extrait et l'alpha fin.
+ * ML Kit sert en parallèle de garde-fou sémantique : il empêche un morceau de mur ou de décor
+ * proche du corps d'être conservé par le matte. En cas de problème natif, ML Kit reste aussi
+ * le moteur de secours complet.
  */
 public final class SegmentationEngine implements AutoCloseable {
     public interface Callback {
@@ -53,7 +55,20 @@ public final class SegmentationEngine implements AutoCloseable {
         }
     }
 
+    private static final class SemanticMask {
+        final float[] values;
+        final int width;
+        final int height;
+
+        SemanticMask(float[] values, int width, int height) {
+            this.values = values;
+            this.width = width;
+            this.height = height;
+        }
+    }
+
     private static final int MLKIT_MAX_DIMENSION = 512;
+    private static final int GUIDE_MAX_DIMENSION = 256;
     private static final int STABILIZATION_NONE = 0;
     private static final int STABILIZATION_STREAM = 1;
     private static final int STABILIZATION_EXPORT = 2;
@@ -70,7 +85,7 @@ public final class SegmentationEngine implements AutoCloseable {
     private volatile RvmNcnnEngine rvm;
     private volatile boolean rvmDisabled;
     private volatile int consecutiveRvmFailures;
-    private volatile String backendName = "RVM ncnn · initialisation";
+    private volatile String backendName = "RVM + guide humain · initialisation";
 
     private float[] previousStreamMask;
     private int previousStreamWidth;
@@ -87,6 +102,7 @@ public final class SegmentationEngine implements AutoCloseable {
                 .build();
         SelfieSegmenterOptions stillOptions = new SelfieSegmenterOptions.Builder()
                 .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+                .enableRawSizeMask()
                 .build();
         streamSegmenter = Segmentation.getClient(streamOptions);
         stillSegmenter = Segmentation.getClient(stillOptions);
@@ -113,6 +129,7 @@ public final class SegmentationEngine implements AutoCloseable {
         if (engine != null) {
             try { engine.reset(); } catch (Throwable ignored) { }
         }
+        MaskedCameraView.clearPublishedForeground();
     }
 
     public synchronized void resetExportHistory() {
@@ -134,17 +151,25 @@ public final class SegmentationEngine implements AutoCloseable {
             RvmNcnnEngine engine = getRvm();
             if (engine != null) {
                 Bitmap inference = null;
+                RvmNcnnEngine.Matte matte = null;
                 try {
                     inference = BitmapUtils.scaleDown(bitmap,
                             RvmNcnnEngine.PREVIEW_MAX_DIMENSION);
-                    RvmNcnnEngine.Matte matte = engine.predict(inference,
+                    matte = engine.predict(inference,
                             RvmNcnnEngine.PREVIEW_MAX_DIMENSION, false);
+                    float[] fused = fuseWithSemanticGuide(matte.alpha, matte.width,
+                            matte.height, inference, true);
                     Bitmap alphaMask = MattingMaskUtils.createAlphaMask(
-                            matte.alpha, matte.width, matte.height);
-                    Result result = new Result(bitmap, null, alphaMask, matte.alpha,
-                            matte.width, matte.height);
+                            fused, matte.width, matte.height);
+
+                    // Le View consomme le foreground correspondant exactement à ce masque.
+                    MaskedCameraView.publishProcessedForeground(matte.foreground);
+                    matte = null;
+
+                    Result result = new Result(bitmap, null, alphaMask, fused,
+                            alphaMask.getWidth(), alphaMask.getHeight());
                     consecutiveRvmFailures = 0;
-                    backendName = "RVM ncnn · suivi temporel";
+                    backendName = "RVM + humain · foreground propre";
                     streamBusy.set(false);
                     if (inference != bitmap && inference != null && !inference.isRecycled()) {
                         inference.recycle();
@@ -152,6 +177,10 @@ public final class SegmentationEngine implements AutoCloseable {
                     mainHandler.post(() -> callback.onResult(result));
                     return;
                 } catch (Throwable error) {
+                    if (matte != null && matte.foreground != null
+                            && !matte.foreground.isRecycled()) {
+                        matte.foreground.recycle();
+                    }
                     if (inference != bitmap && inference != null && !inference.isRecycled()) {
                         inference.recycle();
                     }
@@ -204,20 +233,26 @@ public final class SegmentationEngine implements AutoCloseable {
         resultExecutor.execute(() -> {
             RvmNcnnEngine engine = getRvm();
             if (engine != null) {
+                RvmNcnnEngine.Matte matte = null;
                 try {
                     engine.reset();
-                    RvmNcnnEngine.Matte matte = engine.predict(bitmap,
-                            RvmNcnnEngine.EXPORT_TARGET_SIZE, true);
+                    matte = engine.predict(bitmap, RvmNcnnEngine.EXPORT_TARGET_SIZE, true);
+                    float[] fused = fuseWithSemanticGuide(matte.alpha, matte.width,
+                            matte.height, bitmap, false);
                     Bitmap cutout = MattingMaskUtils.applyMask(
-                            bitmap, matte.alpha, matte.width, matte.height);
+                            matte.foreground, fused, matte.width, matte.height);
+                    matte.foreground.recycle();
+                    matte = null;
                     engine.reset();
                     consecutiveRvmFailures = 0;
-                    backendName = "RVM ncnn · haute qualité";
-                    Result result = new Result(bitmap, cutout, null, matte.alpha,
-                            matte.width, matte.height);
+                    backendName = "RVM + humain · photo HQ";
+                    Result result = new Result(bitmap, cutout, null, fused,
+                            bitmap.getWidth(), bitmap.getHeight());
                     mainHandler.post(() -> callback.onResult(result));
                     return;
                 } catch (Throwable error) {
+                    if (matte != null && matte.foreground != null
+                            && !matte.foreground.isRecycled()) matte.foreground.recycle();
                     noteRvmFailure();
                     try { engine.reset(); } catch (Throwable ignored) { }
                 }
@@ -248,24 +283,28 @@ public final class SegmentationEngine implements AutoCloseable {
         }
     }
 
-    /**
-     * Appelé image par image pendant l'export : contrairement au mode photo, on ne réinitialise
-     * surtout pas RVM afin de conserver la mémoire temporelle sur toute la séquence.
-     */
+    /** Appelé séquentiellement sur toutes les frames exportées : RVM garde sa mémoire. */
     public Result processStillBlocking(Bitmap bitmap, float localThreshold,
                                        float localSoftness) throws Exception {
         RvmNcnnEngine engine = getRvm();
         if (engine != null) {
+            RvmNcnnEngine.Matte matte = null;
             try {
-                RvmNcnnEngine.Matte matte = engine.predict(bitmap,
-                        RvmNcnnEngine.EXPORT_TARGET_SIZE, true);
+                matte = engine.predict(bitmap, RvmNcnnEngine.EXPORT_TARGET_SIZE, true);
+                float[] fused = fuseWithSemanticGuide(matte.alpha, matte.width,
+                        matte.height, bitmap, false);
                 Bitmap alphaMask = MattingMaskUtils.createAlphaMask(
-                        matte.alpha, matte.width, matte.height);
+                        fused, matte.width, matte.height);
+                Bitmap cleanForeground = matte.foreground;
+                matte = null;
+                if (bitmap != cleanForeground && !bitmap.isRecycled()) bitmap.recycle();
                 consecutiveRvmFailures = 0;
-                backendName = "RVM ncnn · export temporel HQ";
-                return new Result(bitmap, null, alphaMask, matte.alpha,
-                        matte.width, matte.height);
+                backendName = "RVM + humain · export HQ";
+                return new Result(cleanForeground, null, alphaMask, fused,
+                        alphaMask.getWidth(), alphaMask.getHeight());
             } catch (Throwable error) {
+                if (matte != null && matte.foreground != null
+                        && !matte.foreground.isRecycled()) matte.foreground.recycle();
                 noteRvmFailure();
             }
         }
@@ -285,13 +324,125 @@ public final class SegmentationEngine implements AutoCloseable {
         }
     }
 
+    private float[] fuseWithSemanticGuide(float[] rvmAlpha, int width, int height,
+                                          Bitmap bitmap, boolean stream) {
+        try {
+            SemanticMask guide = createSemanticGuide(bitmap, stream);
+            if (guide == null) return rvmAlpha.clone();
+            float[] semantic = resizeMask(guide.values, guide.width, guide.height,
+                    width, height);
+            float[] support = dilateSoft(semantic, width, height, 2);
+            float[] fused = new float[rvmAlpha.length];
+            for (int i = 0; i < fused.length; i++) {
+                float alpha = clamp(rvmAlpha[i]);
+                float person = clamp(semantic[i]);
+                float nearbyPerson = clamp(support[i]);
+
+                // Hors de la zone humaine, on supprime fermement les morceaux de mur/décor.
+                float supportGate = smoothStep(0.045f, 0.34f, nearbyPerson);
+                float value = alpha * supportGate;
+
+                // Le centre du corps ne doit pas disparaître même lors d'un mouvement rapide.
+                float core = smoothStep(0.58f, 0.90f, person);
+                value = Math.max(value, core * 0.965f);
+
+                // Les cheveux/doigts peuvent dépasser légèrement du masque sémantique brut.
+                if (alpha > 0.52f && nearbyPerson > 0.12f) {
+                    value = Math.max(value, alpha * 0.90f);
+                }
+                if (person < 0.012f && nearbyPerson < 0.055f) value = 0f;
+                fused[i] = clamp(value);
+            }
+            return fused;
+        } catch (Throwable ignored) {
+            return rvmAlpha.clone();
+        }
+    }
+
+    private SemanticMask createSemanticGuide(Bitmap bitmap, boolean stream) throws Exception {
+        Bitmap guideBitmap = BitmapUtils.scaleDown(bitmap, GUIDE_MAX_DIMENSION);
+        try {
+            Segmenter segmenter = stream ? streamSegmenter : stillSegmenter;
+            SegmentationMask mask = Tasks.await(
+                    segmenter.process(InputImage.fromBitmap(guideBitmap, 0)),
+                    8, TimeUnit.SECONDS);
+            return readMask(mask);
+        } finally {
+            if (guideBitmap != bitmap && !guideBitmap.isRecycled()) guideBitmap.recycle();
+        }
+    }
+
+    private static SemanticMask readMask(SegmentationMask segmentationMask) {
+        int width = segmentationMask.getWidth();
+        int height = segmentationMask.getHeight();
+        ByteBuffer byteBuffer = segmentationMask.getBuffer();
+        byteBuffer.rewind();
+        FloatBuffer buffer = byteBuffer.order(ByteOrder.nativeOrder()).asFloatBuffer();
+        float[] values = new float[width * height];
+        buffer.get(values);
+        return new SemanticMask(values, width, height);
+    }
+
+    private static float[] resizeMask(float[] source, int sourceWidth, int sourceHeight,
+                                      int targetWidth, int targetHeight) {
+        if (sourceWidth == targetWidth && sourceHeight == targetHeight) return source.clone();
+        float[] output = new float[targetWidth * targetHeight];
+        for (int y = 0; y < targetHeight; y++) {
+            float sy = targetHeight == 1 ? 0f
+                    : y * (sourceHeight - 1f) / (targetHeight - 1f);
+            int y0 = Math.max(0, Math.min(sourceHeight - 1, (int) sy));
+            int y1 = Math.min(sourceHeight - 1, y0 + 1);
+            float fy = sy - y0;
+            for (int x = 0; x < targetWidth; x++) {
+                float sx = targetWidth == 1 ? 0f
+                        : x * (sourceWidth - 1f) / (targetWidth - 1f);
+                int x0 = Math.max(0, Math.min(sourceWidth - 1, (int) sx));
+                int x1 = Math.min(sourceWidth - 1, x0 + 1);
+                float fx = sx - x0;
+                float top = source[y0 * sourceWidth + x0] * (1f - fx)
+                        + source[y0 * sourceWidth + x1] * fx;
+                float bottom = source[y1 * sourceWidth + x0] * (1f - fx)
+                        + source[y1 * sourceWidth + x1] * fx;
+                output[y * targetWidth + x] = clamp(top * (1f - fy) + bottom * fy);
+            }
+        }
+        return output;
+    }
+
+    private static float[] dilateSoft(float[] source, int width, int height, int radius) {
+        float[] horizontal = new float[source.length];
+        float[] output = new float[source.length];
+        for (int y = 0; y < height; y++) {
+            int row = y * width;
+            for (int x = 0; x < width; x++) {
+                float max = 0f;
+                int from = Math.max(0, x - radius);
+                int to = Math.min(width - 1, x + radius);
+                for (int xx = from; xx <= to; xx++) max = Math.max(max, source[row + xx]);
+                horizontal[row + x] = max;
+            }
+        }
+        for (int y = 0; y < height; y++) {
+            int from = Math.max(0, y - radius);
+            int to = Math.min(height - 1, y + radius);
+            for (int x = 0; x < width; x++) {
+                float max = 0f;
+                for (int yy = from; yy <= to; yy++) {
+                    max = Math.max(max, horizontal[yy * width + x]);
+                }
+                output[y * width + x] = max;
+            }
+        }
+        return output;
+    }
+
     private synchronized RvmNcnnEngine getRvm() {
         if (rvmDisabled) return null;
         if (rvm != null && rvm.isReady()) return rvm;
         try {
             rvm = new RvmNcnnEngine(appContext);
             consecutiveRvmFailures = 0;
-            backendName = "RVM ncnn · prêt";
+            backendName = "RVM + humain · prêt";
             return rvm;
         } catch (Throwable error) {
             rvmDisabled = true;
@@ -319,23 +470,19 @@ public final class SegmentationEngine implements AutoCloseable {
     private Result makeMlKitResult(Bitmap bitmap, SegmentationMask segmentationMask,
                                    float threshold, float softness,
                                    boolean createCutout, int stabilizationMode) {
-        int maskWidth = segmentationMask.getWidth();
-        int maskHeight = segmentationMask.getHeight();
-        ByteBuffer byteBuffer = segmentationMask.getBuffer();
-        byteBuffer.rewind();
-        FloatBuffer buffer = byteBuffer.order(ByteOrder.nativeOrder()).asFloatBuffer();
-        float[] mask = new float[maskWidth * maskHeight];
-        buffer.get(mask);
+        SemanticMask semantic = readMask(segmentationMask);
+        float[] mask = semantic.values;
         if (stabilizationMode != STABILIZATION_NONE) {
-            mask = stabilizeMlKitMask(mask, maskWidth, maskHeight, stabilizationMode);
+            mask = stabilizeMlKitMask(mask, semantic.width, semantic.height, stabilizationMode);
         }
         Bitmap cutout = createCutout
-                ? BitmapUtils.applyMask(bitmap, mask, maskWidth, maskHeight,
+                ? BitmapUtils.applyMask(bitmap, mask, semantic.width, semantic.height,
                 threshold, softness)
                 : null;
         Bitmap alphaMask = createCutout ? null : BitmapUtils.createAlphaMask(
-                mask, maskWidth, maskHeight, threshold, softness);
-        return new Result(bitmap, cutout, alphaMask, mask, maskWidth, maskHeight);
+                mask, semantic.width, semantic.height, threshold, softness);
+        return new Result(bitmap, cutout, alphaMask, mask,
+                semantic.width, semantic.height);
     }
 
     private synchronized float[] stabilizeMlKitMask(float[] current, int width, int height,
@@ -377,6 +524,13 @@ public final class SegmentationEngine implements AutoCloseable {
         return stable;
     }
 
+    private static float smoothStep(float low, float high, float value) {
+        if (value <= low) return 0f;
+        if (value >= high) return 1f;
+        float t = (value - low) / Math.max(0.0001f, high - low);
+        return t * t * (3f - 2f * t);
+    }
+
     private static float clamp(float value) {
         return Math.max(0f, Math.min(1f, value));
     }
@@ -385,6 +539,7 @@ public final class SegmentationEngine implements AutoCloseable {
     public void close() {
         streamSegmenter.close();
         stillSegmenter.close();
+        MaskedCameraView.clearPublishedForeground();
         RvmNcnnEngine engine = rvm;
         if (engine != null) {
             try { engine.close(); } catch (Throwable ignored) { }
