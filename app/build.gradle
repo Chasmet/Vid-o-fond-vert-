@@ -21,15 +21,18 @@ def humanSegModelDir = file("$humanSegAssetsDir/pp_humanseg")
 def humanSegNbFile = file("$humanSegModelDir/model.nb")
 def humanSegZipFile = file("$generatedHumanSegRoot/pp_humansegv2_lite.zip")
 def humanSegExtractDir = file("$generatedHumanSegRoot/inference")
-def paddleLiteTar = file("$generatedHumanSegRoot/paddle_lite_libs_v2_10_rc.tar.gz")
-def paddleLiteExtractDir = file("$generatedHumanSegRoot/paddle-runtime")
+def paddleArm64Tar = file("$generatedHumanSegRoot/paddle_lite_2_13_armv8.tar.gz")
+def paddleArmv7Tar = file("$generatedHumanSegRoot/paddle_lite_2_13_armv7.tar.gz")
+def paddleArm64ExtractDir = file("$generatedHumanSegRoot/paddle-arm64")
+def paddleArmv7ExtractDir = file("$generatedHumanSegRoot/paddle-armv7")
 def paddleJarFile = file("$generatedHumanSegRoot/libs/PaddlePredictor.jar")
 def paddleJniDir = file("$generatedHumanSegRoot/jniLibs")
 def paddleOptFile = file("$generatedHumanSegRoot/opt_linux_x86")
 
 def humanSegUrl = 'https://paddleseg.bj.bcebos.com/dygraph/pp_humanseg_v2/human_pp_humansegv2_lite_192x192_inference_model_with_softmax.zip'
-def paddleLiteUrl = 'https://paddlelite-demo.bj.bcebos.com/libs/android/paddle_lite_libs_v2_10_rc.tar.gz'
-def paddleOptUrl = 'https://github.com/PaddlePaddle/Paddle-Lite/releases/download/v2.10-rc/opt_linux_x86'
+def paddleArm64Url = 'https://github.com/PaddlePaddle/Paddle-Lite/releases/download/v2.13-rc/inference_lite_lib.android.armv8.clang.c++_static.tar.gz'
+def paddleArmv7Url = 'https://github.com/PaddlePaddle/Paddle-Lite/releases/download/v2.13-rc/inference_lite_lib.android.armv7.clang.c++_static.tar.gz'
+def paddleOptUrl = 'https://github.com/PaddlePaddle/Paddle-Lite/releases/download/v2.13-rc/opt_linux_x86'
 
 def downloadTo = { String url, File target ->
     target.parentFile.mkdirs()
@@ -92,7 +95,7 @@ tasks.register('prepareRvmNativeDependencies') {
     dependsOn tasks.named('prepareRvmAssets'), tasks.named('prepareNcnnSdk')
 }
 
-// Runtime Java officiel Paddle Lite 2.10-rc. Rien n'est téléchargé sur le téléphone.
+// Runtime Java officiel Paddle Lite 2.13-rc, identique au convertisseur utilisé pour model.nb.
 tasks.register('preparePaddleLiteRuntime') {
     outputs.files(paddleJarFile,
             file("$paddleJniDir/arm64-v8a/libpaddle_lite_jni.so"),
@@ -100,30 +103,42 @@ tasks.register('preparePaddleLiteRuntime') {
     doLast {
         File arm64 = file("$paddleJniDir/arm64-v8a/libpaddle_lite_jni.so")
         File armv7 = file("$paddleJniDir/armeabi-v7a/libpaddle_lite_jni.so")
-        if (paddleJarFile.isFile() && arm64.isFile() && armv7.isFile()) return
+        if (paddleJarFile.isFile() && paddleJarFile.length() > 10_000L
+                && arm64.isFile() && arm64.length() > 500_000L
+                && armv7.isFile() && armv7.length() > 500_000L) return
 
-        println 'Préparation de Paddle Lite Android pour PP-HumanSeg…'
-        if (!paddleLiteTar.isFile() || paddleLiteTar.length() < 1_000_000L) {
-            downloadTo(paddleLiteUrl, paddleLiteTar)
+        println 'Préparation Paddle Lite Android 2.13-rc…'
+        if (!paddleArm64Tar.isFile() || paddleArm64Tar.length() < 1_000_000L) {
+            downloadTo(paddleArm64Url, paddleArm64Tar)
         }
-        delete paddleLiteExtractDir
-        paddleLiteExtractDir.mkdirs()
+        if (!paddleArmv7Tar.isFile() || paddleArmv7Tar.length() < 1_000_000L) {
+            downloadTo(paddleArmv7Url, paddleArmv7Tar)
+        }
+
+        delete paddleArm64ExtractDir
+        delete paddleArmv7ExtractDir
+        paddleArm64ExtractDir.mkdirs()
+        paddleArmv7ExtractDir.mkdirs()
         copy {
-            from tarTree(resources.gzip(paddleLiteTar))
-            into paddleLiteExtractDir
+            from tarTree(resources.gzip(paddleArm64Tar))
+            into paddleArm64ExtractDir
+        }
+        copy {
+            from tarTree(resources.gzip(paddleArmv7Tar))
+            into paddleArmv7ExtractDir
         }
 
-        File jarSource = fileTree(paddleLiteExtractDir).matching {
-            include '**/java/PaddlePredictor.jar'
+        File jarSource = fileTree(paddleArm64ExtractDir).matching {
+            include '**/java/jar/PaddlePredictor.jar'
         }.files.find { it.isFile() }
-        File arm64Source = fileTree(paddleLiteExtractDir).matching {
-            include '**/java/libs/arm64-v8a/libpaddle_lite_jni.so'
+        File arm64Source = fileTree(paddleArm64ExtractDir).matching {
+            include '**/java/so/libpaddle_lite_jni.so'
         }.files.find { it.isFile() }
-        File armv7Source = fileTree(paddleLiteExtractDir).matching {
-            include '**/java/libs/armeabi-v7a/libpaddle_lite_jni.so'
+        File armv7Source = fileTree(paddleArmv7ExtractDir).matching {
+            include '**/java/so/libpaddle_lite_jni.so'
         }.files.find { it.isFile() }
         if (jarSource == null || arm64Source == null || armv7Source == null) {
-            throw new GradleException('Runtime Paddle Lite Android incomplet')
+            throw new GradleException('Runtime Paddle Lite 2.13-rc Android incomplet')
         }
 
         paddleJarFile.parentFile.mkdirs()
@@ -135,24 +150,26 @@ tasks.register('preparePaddleLiteRuntime') {
                 java.nio.file.StandardCopyOption.REPLACE_EXISTING)
         java.nio.file.Files.copy(armv7Source.toPath(), armv7.toPath(),
                 java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        println 'Paddle Lite Android prêt'
+        println 'Paddle Lite Android 2.13-rc prêt'
     }
 }
 
-// Modèle officiel PaddleSeg converti avec l'outil natif officiel Paddle Lite 2.10-rc.
+// Modèle officiel PaddleSeg converti avec l'outil officiel de la même version 2.13-rc.
 tasks.register('prepareHumanSegModel') {
     outputs.file(humanSegNbFile)
     doLast {
-        if (humanSegNbFile.isFile() && humanSegNbFile.length() > 500_000L) return
+        if (humanSegNbFile.isFile() && humanSegNbFile.length() > 100_000L) return
         println 'Préparation du modèle PP-HumanSegV2-Lite 192x192…'
-        if (!humanSegZipFile.isFile() || humanSegZipFile.length() < 500_000L) {
+        if (!humanSegZipFile.isFile() || humanSegZipFile.length() < 100_000L) {
             downloadTo(humanSegUrl, humanSegZipFile)
         }
         if (!paddleOptFile.isFile() || paddleOptFile.length() < 1_000_000L) {
-            println 'Téléchargement de Paddle Lite opt 2.10-rc…'
+            println 'Téléchargement Paddle Lite opt 2.13-rc…'
             downloadTo(paddleOptUrl, paddleOptFile)
         }
-        paddleOptFile.setExecutable(true)
+        if (!paddleOptFile.setExecutable(true) && !paddleOptFile.canExecute()) {
+            throw new GradleException('Convertisseur Paddle Lite non exécutable')
+        }
 
         delete humanSegExtractDir
         humanSegExtractDir.mkdirs()
@@ -177,10 +194,10 @@ tasks.register('prepareHumanSegModel') {
                     '--valid_targets=arm',
                     '--optimize_out_type=naive_buffer'
         }
-        if (!humanSegNbFile.isFile() || humanSegNbFile.length() < 500_000L) {
+        if (!humanSegNbFile.isFile() || humanSegNbFile.length() < 100_000L) {
             throw new GradleException('Conversion PP-HumanSeg en model.nb échouée')
         }
-        println "PP-HumanSegV2-Lite prêt : ${String.format('%.1f', humanSegNbFile.length() / 1024d / 1024d)} Mo"
+        println "PP-HumanSegV2-Lite prêt : ${String.format('%.2f', humanSegNbFile.length() / 1024d / 1024d)} Mo"
     }
 }
 
