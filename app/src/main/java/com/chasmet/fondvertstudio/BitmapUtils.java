@@ -178,14 +178,16 @@ public final class BitmapUtils {
     public static Bitmap createAlphaMask(float[] mask, int width, int height,
                                          float threshold, float softness) {
         float[] refined = refineMask(mask, width, height);
-        int[] pixels = new int[width * height];
+        byte[] alpha = new byte[width * height];
         float edge0 = clamp(threshold - softness, 0f, 1f);
         float edge1 = clamp(threshold + softness, edge0 + 0.001f, 1f);
         for (int index = 0; index < refined.length; index++) {
-            int alpha = Math.round(255f * smoothStep(edge0, edge1, refined[index]));
-            pixels[index] = (alpha << 24) | 0x00FFFFFF;
+            alpha[index] = (byte) Math.round(255f
+                    * smoothStep(edge0, edge1, refined[index]));
         }
-        return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+        Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ALPHA_8);
+        output.copyPixelsFromBuffer(ByteBuffer.wrap(alpha));
+        return output;
     }
 
     private static int sharpenPixel(int[] pixels, int width, int x, int y, int center) {

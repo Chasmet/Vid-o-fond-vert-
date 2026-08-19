@@ -4,7 +4,7 @@ Application Android native pour filmer une personne détourée devant un décor 
 
 ## Fonctions
 
-- enregistrement caméra avant ou arrière en Full HD, avec aperçu IA 720p fluide ;
+- enregistrement caméra avant ou arrière en Full HD, avec aperçu léger et fluide ;
 - les images et vidéos importées servent exclusivement de décor et ne sont jamais détourées ;
 - aperçu du montage final en direct ;
 - décors sans fond, vert pur, noir, blanc, image ou vidéo ;
@@ -20,6 +20,7 @@ Application Android native pour filmer une personne détourée devant un décor 
 - minSdk 21, targetSdk 34 et compileSdk 34 ;
 - CameraX pour la caméra et l’enregistrement ;
 - ML Kit Selfie Segmentation en mode flux non bloquant, avec rendu du masque accéléré par le GPU ;
+- image caméra continue à 30 i/s et masque IA mis à jour séparément, sans figer l'aperçu ;
 - décodage séquentiel par lots sur Android 9+ pour accélérer fortement la création vidéo ;
 - masque brut redimensionné en bilinéaire, bords renforcés et détails caméra accentués ;
 - MediaCodec et MediaMuxer pour l’encodage vidéo local ;

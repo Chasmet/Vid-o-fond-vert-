@@ -45,13 +45,30 @@ public final class MaskedCameraView extends View {
 
     public void setFrame(Bitmap newSource, float[] newMask, int newMaskWidth,
                          int newMaskHeight, float newThreshold, float newSoftness) {
-        source = newSource;
+        setSource(newSource);
         mask = newMask;
         maskWidth = newMaskWidth;
         maskHeight = newMaskHeight;
         threshold = newThreshold;
         softness = newSoftness;
         rebuildMaskBitmap();
+        invalidate();
+    }
+
+    public void setSource(Bitmap newSource) {
+        source = newSource;
+        invalidate();
+    }
+
+    public void setMask(Bitmap newMaskBitmap, float[] newMask, int newMaskWidth,
+                        int newMaskHeight, float newThreshold, float newSoftness) {
+        recycleMaskBitmap();
+        maskBitmap = newMaskBitmap;
+        mask = newMask;
+        maskWidth = newMaskWidth;
+        maskHeight = newMaskHeight;
+        threshold = newThreshold;
+        softness = newSoftness;
         invalidate();
     }
 

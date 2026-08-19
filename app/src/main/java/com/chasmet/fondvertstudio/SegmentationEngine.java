@@ -32,13 +32,16 @@ public final class SegmentationEngine implements AutoCloseable {
     public static final class Result {
         public final Bitmap source;
         public final Bitmap cutout;
+        public final Bitmap alphaMask;
         public final float[] mask;
         public final int maskWidth;
         public final int maskHeight;
 
-        Result(Bitmap source, Bitmap cutout, float[] mask, int maskWidth, int maskHeight) {
+        Result(Bitmap source, Bitmap cutout, Bitmap alphaMask, float[] mask,
+               int maskWidth, int maskHeight) {
             this.source = source;
             this.cutout = cutout;
+            this.alphaMask = alphaMask;
             this.mask = mask;
             this.maskWidth = maskWidth;
             this.maskHeight = maskHeight;
@@ -168,7 +171,9 @@ public final class SegmentationEngine implements AutoCloseable {
                 ? BitmapUtils.applyMask(bitmap, mask, maskWidth, maskHeight,
                 threshold, softness)
                 : null;
-        return new Result(bitmap, cutout, mask, maskWidth, maskHeight);
+        Bitmap alphaMask = createCutout ? null : BitmapUtils.createAlphaMask(
+                mask, maskWidth, maskHeight, threshold, softness);
+        return new Result(bitmap, cutout, alphaMask, mask, maskWidth, maskHeight);
     }
 
     @Override

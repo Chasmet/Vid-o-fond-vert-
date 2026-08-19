@@ -329,10 +329,10 @@ public final class MainActivity extends AppCompatActivity {
                 .requireLensFacing(lensFacing)
                 .build();
         try {
-            // L'enregistrement reste en 1080p. L'analyse 720p suffit pour le masque
-            // 256px du modèle et évite de bloquer le processeur avec 2 millions
-            // de pixels à chaque image.
-            ImageAnalysis analysis = createImageAnalysis(new Size(720, 1280));
+            // Le VideoCapture reste en 1080p. Ce flux léger sert uniquement à
+            // l'aperçu et au masque : le visage continue donc de bouger même
+            // pendant qu'une inférence IA est encore en cours.
+            ImageAnalysis analysis = createImageAnalysis(new Size(480, 854));
             cameraProvider.bindToLifecycle(this, cameraSelector, analysis, videoCapture);
         } catch (Exception error) {
             showError("Cette caméra ne permet pas le mode vidéo sélectionné");
@@ -350,7 +350,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void analyzeCameraFrame(@NonNull ImageProxy imageProxy) {
-        if (segmenter == null || segmenter.isStreamBusy()) {
+        if (segmenter == null) {
             imageProxy.close();
             return;
         }
@@ -365,10 +365,22 @@ public final class MainActivity extends AppCompatActivity {
         }
         bitmap = BitmapUtils.rotateAndMirror(bitmap, rotation,
                 lensFacing == CameraSelector.LENS_FACING_FRONT);
-        segmenter.processStream(bitmap, new SegmentationEngine.Callback() {
+        Bitmap inference = null;
+        if (!segmenter.isStreamBusy()) {
+            inference = BitmapUtils.scaleDown(bitmap, 512);
+            if (inference == bitmap) {
+                inference = bitmap.copy(Bitmap.Config.ARGB_8888, false);
+            }
+        }
+        Bitmap displayFrame = bitmap;
+        uiHandler.post(() -> acceptSourceFrame(displayFrame));
+        if (inference == null) {
+            return;
+        }
+        segmenter.processStream(inference, new SegmentationEngine.Callback() {
             @Override
             public void onResult(SegmentationEngine.Result result) {
-                acceptResult(result);
+                acceptMaskResult(result);
             }
 
             @Override
@@ -512,19 +524,24 @@ public final class MainActivity extends AppCompatActivity {
                 });
     }
 
-    private void acceptResult(SegmentationEngine.Result result) {
-        edgeGeneration.incrementAndGet();
+    private void acceptSourceFrame(Bitmap source) {
         Bitmap oldSource = currentSource;
-        currentSource = result.source;
+        currentSource = source;
+        subjectPreview.setSource(source);
+        previewHint.setVisibility(View.GONE);
+        if (oldSource != null && oldSource != source && !oldSource.isRecycled()) {
+            oldSource.recycle();
+        }
+    }
+
+    private void acceptMaskResult(SegmentationEngine.Result result) {
+        edgeGeneration.incrementAndGet();
         currentMask = result.mask;
         currentMaskWidth = result.maskWidth;
         currentMaskHeight = result.maskHeight;
-        subjectPreview.setFrame(currentSource, currentMask,
-                currentMaskWidth, currentMaskHeight, threshold, softness);
-        previewHint.setVisibility(View.GONE);
-        if (oldSource != null && oldSource != currentSource && !oldSource.isRecycled()) {
-            oldSource.recycle();
-        }
+        subjectPreview.setMask(result.alphaMask, currentMask, currentMaskWidth,
+                currentMaskHeight, threshold, softness);
+        if (result.source != null && !result.source.isRecycled()) result.source.recycle();
         if (result.cutout != null && !result.cutout.isRecycled()) result.cutout.recycle();
     }
 
