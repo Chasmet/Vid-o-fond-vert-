@@ -26,14 +26,16 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Installer Python 3.8 pour Paddle Lite
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.8"
-
       - name: Installer NDK et CMake
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" "cmake;3.22.1" >/dev/null
+
+      - name: Inspecter les binaires officiels Paddle Lite 2.13
+        run: |
+          curl -fsSL "https://api.github.com/repos/PaddlePaddle/Paddle-Lite/releases/tags/v2.13-rc" \
+            | jq -r '.assets[].name' \
+            | grep -E '(^opt_linux_x86$|android.*(armv7|armv8|java))' \
+            | tee /tmp/paddle-assets.txt
 
       - name: Préparer Gradle
         uses: gradle/actions/setup-gradle@v4
