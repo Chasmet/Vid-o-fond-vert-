@@ -91,7 +91,7 @@ dependencies {
     implementation "androidx.camera:camera-lifecycle:${cameraxVersion}"
     implementation "androidx.camera:camera-video:${cameraxVersion}"
 
-    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.23.2'
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.22.0'
     implementation 'com.google.mlkit:segmentation-selfie:16.0.0-beta6'
     implementation 'androidx.work:work-runtime:2.9.1'
 }
