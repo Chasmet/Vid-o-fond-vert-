@@ -36,27 +36,28 @@ jobs:
       - name: Autoriser Gradle
         run: chmod +x gradlew
 
-      - name: Compiler et tester PP-HumanSeg + rendu HQ
+      - name: Compiler et tester la correction stable
         run: ./gradlew --no-daemon clean assembleDebug lintDebug
 
-      - name: Vérifier les moteurs locaux dans l'APK
+      - name: Vérifier RVM dans l'APK
         run: |
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/pp_humanseg/model.nb"
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/arm64-v8a/libpaddle_lite_jni.so"
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/armeabi-v7a/libpaddle_lite_jni.so"
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/rvm_mobilenetv3.ncnn.param"
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/rvm_mobilenetv3.ncnn.bin"
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/arm64-v8a/librvmncnn.so"
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/armeabi-v7a/librvmncnn.so"
-          echo "PP-HumanSegV2-Lite + fallback Android 16 + RVM export présents dans l'APK"
+          if unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "paddle_lite"; then
+            echo "ERREUR: Paddle Lite est encore présent dans l'APK"
+            exit 1
+          fi
+          echo "APK stable: RVM présent, Paddle Lite absent"
 
       - name: Nommer l'APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.9.1-Android16-Fix.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.9.2-Android16-Stable.apk
 
       - name: Publier l'APK
         uses: actions/upload-artifact@v4
         with:
-          name: Fond-Vert-Studio-APK
-          path: Fond-Vert-Studio-v1.9.1-Android16-Fix.apk
+          name: Fond-Vert-Studio-v1.9.2-Android16-Stable
+          path: Fond-Vert-Studio-v1.9.2-Android16-Stable.apk
           if-no-files-found: error
           retention-days: 30
