@@ -49,7 +49,6 @@ final class H264FrameEncoder implements AutoCloseable {
         Image image = codec.getInputImage(inputIndex);
         if (image != null) {
             writeBitmapToImage(bitmap, image);
-            image.close();
         } else {
             ByteBuffer buffer = codec.getInputBuffer(inputIndex);
             if (buffer == null) {

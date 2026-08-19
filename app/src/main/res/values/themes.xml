@@ -7,7 +7,6 @@
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:navigationBarColor">@color/background</item>
         <item name="android:statusBarColor">@color/background</item>
-        <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowBackground">@color/background</item>
         <item name="materialButtonStyle">@style/Widget.FondVertStudio.Button</item>
         <item name="android:colorAccent">@color/accent</item>

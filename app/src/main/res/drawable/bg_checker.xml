@@ -5,10 +5,4 @@
             <solid android:color="@color/checker_light" />
         </shape>
     </item>
-    <item android:width="16dp" android:height="16dp" android:gravity="top|start">
-        <shape android:shape="rectangle"><solid android:color="@color/checker_dark" /></shape>
-    </item>
-    <item android:width="16dp" android:height="16dp" android:gravity="bottom|end">
-        <shape android:shape="rectangle"><solid android:color="@color/checker_dark" /></shape>
-    </item>
 </layer-list>
