@@ -1,12 +1,13 @@
 package com.chasmet.fondvertstudio;
 
 import android.content.Context;
-import android.graphics.Bitmap;
 import android.content.res.AssetManager;
+import android.graphics.Bitmap;
+import android.graphics.Color;
 
 /**
  * Pont Java vers Robust Video Matting MobileNetV3 exécuté localement avec ncnn.
- * Le cœur natif conserve les quatre états récurrents entre les images vidéo.
+ * RVM renvoie à la fois le foreground RGB nettoyé de l'ancien décor et son alpha.
  */
 final class RvmNcnnEngine implements AutoCloseable {
     static final int PREVIEW_MAX_DIMENSION = 512;
@@ -16,11 +17,13 @@ final class RvmNcnnEngine implements AutoCloseable {
         final float[] alpha;
         final int width;
         final int height;
+        final Bitmap foreground;
 
-        Matte(float[] alpha, int width, int height) {
+        Matte(float[] alpha, int width, int height, Bitmap foreground) {
             this.alpha = alpha;
             this.width = width;
             this.height = height;
+            this.foreground = foreground;
         }
     }
 
@@ -69,18 +72,29 @@ final class RvmNcnnEngine implements AutoCloseable {
             input = bitmap.copy(Bitmap.Config.ARGB_8888, false);
         }
         try {
-            byte[] alphaBytes = nativePredict(nativeHandle, input,
+            byte[] rgba = nativePredict(nativeHandle, input,
                     Math.max(256, targetSize), highQuality);
             int width = input.getWidth();
             int height = input.getHeight();
-            if (alphaBytes == null || alphaBytes.length != width * height) {
-                throw new IllegalStateException("Masque RVM incomplet");
+            int pixelCount = width * height;
+            if (rgba == null || rgba.length != pixelCount * 4) {
+                throw new IllegalStateException("Sortie RVM incomplète");
             }
-            float[] alpha = new float[alphaBytes.length];
-            for (int i = 0; i < alphaBytes.length; i++) {
-                alpha[i] = (alphaBytes[i] & 0xFF) / 255f;
+
+            float[] alpha = new float[pixelCount];
+            int[] foregroundPixels = new int[pixelCount];
+            int offset = 0;
+            for (int i = 0; i < pixelCount; i++) {
+                int red = rgba[offset++] & 0xFF;
+                int green = rgba[offset++] & 0xFF;
+                int blue = rgba[offset++] & 0xFF;
+                int a = rgba[offset++] & 0xFF;
+                alpha[i] = a / 255f;
+                foregroundPixels[i] = Color.argb(255, red, green, blue);
             }
-            return new Matte(alpha, width, height);
+            Bitmap foreground = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            foreground.setPixels(foregroundPixels, 0, width, 0, 0, width, height);
+            return new Matte(alpha, width, height, foreground);
         } finally {
             if (input != bitmap && !input.isRecycled()) input.recycle();
         }
