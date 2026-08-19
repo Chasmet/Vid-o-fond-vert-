@@ -26,6 +26,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Installer Python 3.8 pour Paddle Lite
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+
       - name: Installer NDK et CMake
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" "cmake;3.22.1" >/dev/null
