@@ -3,14 +3,13 @@ package com.chasmet.fondvertstudio;
 import android.content.Context;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
-import android.graphics.Color;
 
 /**
  * Pont Java vers Robust Video Matting MobileNetV3 exécuté localement avec ncnn.
- * RVM renvoie à la fois le foreground RGB nettoyé de l'ancien décor et son alpha.
+ * Le preview utilise un chemin 320 px faible latence. Le rendu final reste à 512 px.
  */
 final class RvmNcnnEngine implements AutoCloseable {
-    static final int PREVIEW_MAX_DIMENSION = 512;
+    static final int PREVIEW_MAX_DIMENSION = 320;
     static final int EXPORT_TARGET_SIZE = 512;
 
     static final class Matte {
@@ -71,31 +70,27 @@ final class RvmNcnnEngine implements AutoCloseable {
         if (bitmap.getConfig() != Bitmap.Config.ARGB_8888) {
             input = bitmap.copy(Bitmap.Config.ARGB_8888, false);
         }
+        Bitmap foreground = Bitmap.createBitmap(
+                input.getWidth(), input.getHeight(), Bitmap.Config.ARGB_8888);
+        boolean success = false;
         try {
-            byte[] rgba = nativePredict(nativeHandle, input,
+            byte[] alphaBytes = nativePredict(nativeHandle, input, foreground,
                     Math.max(256, targetSize), highQuality);
             int width = input.getWidth();
             int height = input.getHeight();
             int pixelCount = width * height;
-            if (rgba == null || rgba.length != pixelCount * 4) {
+            if (alphaBytes == null || alphaBytes.length != pixelCount) {
                 throw new IllegalStateException("Sortie RVM incomplète");
             }
 
             float[] alpha = new float[pixelCount];
-            int[] foregroundPixels = new int[pixelCount];
-            int offset = 0;
             for (int i = 0; i < pixelCount; i++) {
-                int red = rgba[offset++] & 0xFF;
-                int green = rgba[offset++] & 0xFF;
-                int blue = rgba[offset++] & 0xFF;
-                int a = rgba[offset++] & 0xFF;
-                alpha[i] = a / 255f;
-                foregroundPixels[i] = Color.argb(255, red, green, blue);
+                alpha[i] = (alphaBytes[i] & 0xFF) / 255f;
             }
-            Bitmap foreground = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            foreground.setPixels(foregroundPixels, 0, width, 0, 0, width, height);
+            success = true;
             return new Matte(alpha, width, height, foreground);
         } finally {
+            if (!success && !foreground.isRecycled()) foreground.recycle();
             if (input != bitmap && !input.isRecycled()) input.recycle();
         }
     }
@@ -114,6 +109,7 @@ final class RvmNcnnEngine implements AutoCloseable {
 
     private static native long nativeCreate(AssetManager assets);
     private static native byte[] nativePredict(long handle, Bitmap bitmap,
+                                               Bitmap foreground,
                                                int targetSize, boolean highQuality);
     private static native void nativeReset(long handle);
     private static native void nativeDestroy(long handle);

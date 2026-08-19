@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -40,8 +41,9 @@ public:
         clearState();
     }
 
-    bool predict(JNIEnv* env, jobject bitmap, int targetSize, bool highQuality,
-                 std::vector<unsigned char>& rgba, std::string& error) {
+    bool predict(JNIEnv* env, jobject bitmap, jobject foregroundBitmap,
+                 int targetSize, bool highQuality,
+                 std::vector<unsigned char>& alpha, std::string& error) {
         std::lock_guard<std::mutex> guard(lock);
 
         AndroidBitmapInfo info{};
@@ -51,6 +53,15 @@ public:
         }
         if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
             error = "format bitmap non RGBA8888";
+            return false;
+        }
+
+        AndroidBitmapInfo foregroundInfo{};
+        if (AndroidBitmap_getInfo(env, foregroundBitmap, &foregroundInfo)
+                != ANDROID_BITMAP_RESULT_SUCCESS
+                || foregroundInfo.format != ANDROID_BITMAP_FORMAT_RGBA_8888
+                || foregroundInfo.width != info.width || foregroundInfo.height != info.height) {
+            error = "bitmap foreground invalide";
             return false;
         }
 
@@ -222,19 +233,27 @@ public:
         croppedFgr.substract_mean_normalize(nullptr, denormRgb);
         croppedPha.substract_mean_normalize(nullptr, denormAlpha);
 
-        std::vector<unsigned char> rgb(static_cast<size_t>(w) * h * 3);
-        std::vector<unsigned char> alpha(static_cast<size_t>(w) * h);
-        croppedFgr.to_pixels(rgb.data(), ncnn::Mat::PIXEL_RGB);
-        croppedPha.to_pixels(alpha.data(), ncnn::Mat::PIXEL_GRAY);
-
-        rgba.resize(static_cast<size_t>(w) * h * 4);
-        const size_t pixelCount = static_cast<size_t>(w) * h;
-        for (size_t i = 0; i < pixelCount; i++) {
-            rgba[i * 4] = rgb[i * 3];
-            rgba[i * 4 + 1] = rgb[i * 3 + 1];
-            rgba[i * 4 + 2] = rgb[i * 3 + 2];
-            rgba[i * 4 + 3] = alpha[i];
+        // Écrit le foreground directement dans le Bitmap Java : plus de gros tableau RGBA
+        // traversant JNI ni de conversion pixel par pixel côté Java.
+        std::vector<unsigned char> rgba(static_cast<size_t>(w) * h * 4);
+        croppedFgr.to_pixels(rgba.data(), ncnn::Mat::PIXEL_RGB2RGBA);
+        void* foregroundPixels = nullptr;
+        if (AndroidBitmap_lockPixels(env, foregroundBitmap, &foregroundPixels)
+                != ANDROID_BITMAP_RESULT_SUCCESS || foregroundPixels == nullptr) {
+            error = "pixels foreground inaccessibles";
+            return false;
         }
+        const size_t rowBytes = static_cast<size_t>(w) * 4;
+        for (int y = 0; y < h; y++) {
+            std::memcpy(static_cast<unsigned char*>(foregroundPixels)
+                                + static_cast<size_t>(y) * foregroundInfo.stride,
+                        rgba.data() + static_cast<size_t>(y) * rowBytes,
+                        rowBytes);
+        }
+        AndroidBitmap_unlockPixels(env, foregroundBitmap);
+
+        alpha.resize(static_cast<size_t>(w) * h);
+        croppedPha.to_pixels(alpha.data(), ncnn::Mat::PIXEL_GRAY);
         return true;
     }
 
@@ -307,7 +326,7 @@ Java_com_chasmet_fondvertstudio_RvmNcnnEngine_nativeCreate(
 
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_chasmet_fondvertstudio_RvmNcnnEngine_nativePredict(
-        JNIEnv* env, jclass, jlong handle, jobject bitmap,
+        JNIEnv* env, jclass, jlong handle, jobject bitmap, jobject foregroundBitmap,
         jint targetSize, jboolean highQuality) {
     RvmCore* engine = fromHandle(handle);
     if (!engine) {
@@ -315,21 +334,21 @@ Java_com_chasmet_fondvertstudio_RvmNcnnEngine_nativePredict(
         return nullptr;
     }
 
-    std::vector<unsigned char> rgba;
+    std::vector<unsigned char> alpha;
     std::string error;
-    if (!engine->predict(env, bitmap, static_cast<int>(targetSize),
-                         highQuality == JNI_TRUE, rgba, error)) {
+    if (!engine->predict(env, bitmap, foregroundBitmap, static_cast<int>(targetSize),
+                         highQuality == JNI_TRUE, alpha, error)) {
         throwJava(env, error.c_str());
         return nullptr;
     }
 
-    jbyteArray output = env->NewByteArray(static_cast<jsize>(rgba.size()));
+    jbyteArray output = env->NewByteArray(static_cast<jsize>(alpha.size()));
     if (!output) {
         throwJava(env, "Mémoire RVM insuffisante");
         return nullptr;
     }
-    env->SetByteArrayRegion(output, 0, static_cast<jsize>(rgba.size()),
-                            reinterpret_cast<const jbyte*>(rgba.data()));
+    env->SetByteArrayRegion(output, 0, static_cast<jsize>(alpha.size()),
+                            reinterpret_cast<const jbyte*>(alpha.data()));
     return output;
 }
 
