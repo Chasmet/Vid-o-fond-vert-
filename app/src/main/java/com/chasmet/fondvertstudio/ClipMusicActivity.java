@@ -3,12 +3,12 @@ package com.chasmet.fondvertstudio;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.media.MediaPlayer;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
@@ -17,6 +17,7 @@ import android.os.SystemClock;
 import android.provider.OpenableColumns;
 import android.util.Size;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -54,17 +55,28 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Mode clip : le son importé est la piste maître, le microphone caméra n'est jamais enregistré. */
+/**
+ * Mode clip musical.
+ *
+ * La musique importée est la seule piste audio du MP4. Le microphone caméra n'est jamais
+ * activé dans ce mode. Le sujet est détouré et peut être placé devant un fond vert, une image
+ * ou une vidéo importée.
+ */
 public final class ClipMusicActivity extends AppCompatActivity {
     private MaskedCameraView subjectPreview;
+    private ImageView backgroundImage;
+    private FillVideoView backgroundVideo;
+    private View previewContainer;
     private TextView previewHint;
     private TextView recordingTimer;
     private TextView transformHint;
     private TextView audioName;
     private TextView musicPosition;
     private TextView clipStatus;
+    private TextView decorStatus;
     private ProgressBar processingProgress;
     private View processingOverlay;
+
     private MaterialButton recordButton;
     private MaterialButton finishButton;
     private MaterialButton flipCameraButton;
@@ -72,12 +84,17 @@ public final class ClipMusicActivity extends AppCompatActivity {
     private MaterialButton importAudioButton;
     private MaterialButton musicPlayButton;
     private MaterialButton resetSubjectButton;
+    private MaterialButton importImageButton;
+    private MaterialButton importVideoButton;
+    private MaterialButton greenBackgroundButton;
     private SeekBar musicSeekBar;
 
     private int quality = 1080;
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
     private final float threshold = 0.50f;
     private final float softness = 0.065f;
+
+    private final BackgroundSpec backgroundSpec = new BackgroundSpec();
 
     private ProcessCameraProvider cameraProvider;
     private VideoCapture<Recorder> videoCapture;
@@ -89,9 +106,6 @@ public final class ClipMusicActivity extends AppCompatActivity {
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
 
     private Bitmap currentSource;
-    private float[] currentMask;
-    private int currentMaskWidth;
-    private int currentMaskHeight;
 
     private Uri musicUri;
     private MediaPlayer musicPlayer;
@@ -107,6 +121,8 @@ public final class ClipMusicActivity extends AppCompatActivity {
     private static final long TRANSFORM_SAMPLE_INTERVAL_MS = 34L;
 
     private ActivityResultLauncher<String[]> audioPicker;
+    private ActivityResultLauncher<String[]> backgroundImagePicker;
+    private ActivityResultLauncher<String[]> backgroundVideoPicker;
     private ActivityResultLauncher<String> cameraPermissionLauncher;
 
     private final Runnable timerTick = new Runnable() {
@@ -148,6 +164,9 @@ public final class ClipMusicActivity extends AppCompatActivity {
         registerLaunchers();
         setupControls();
 
+        backgroundSpec.setColor(Color.rgb(0, 255, 0));
+        showGreenBackground();
+
         segmenter = new SegmentationEngine(this);
         segmenter.setEdgeSettings(threshold, softness);
         requestCameraPermission();
@@ -156,12 +175,16 @@ public final class ClipMusicActivity extends AppCompatActivity {
 
     private void bindViews() {
         subjectPreview = findViewById(R.id.subjectPreview);
+        backgroundImage = findViewById(R.id.backgroundImage);
+        backgroundVideo = findViewById(R.id.backgroundVideo);
+        previewContainer = findViewById(R.id.previewContainer);
         previewHint = findViewById(R.id.previewHint);
         recordingTimer = findViewById(R.id.recordingTimer);
         transformHint = findViewById(R.id.transformHint);
         audioName = findViewById(R.id.audioName);
         musicPosition = findViewById(R.id.musicPosition);
         clipStatus = findViewById(R.id.clipStatus);
+        decorStatus = findViewById(R.id.decorStatus);
         processingProgress = findViewById(R.id.processingProgress);
         processingOverlay = findViewById(R.id.processingOverlay);
         recordButton = findViewById(R.id.recordButton);
@@ -171,6 +194,9 @@ public final class ClipMusicActivity extends AppCompatActivity {
         importAudioButton = findViewById(R.id.importAudioButton);
         musicPlayButton = findViewById(R.id.musicPlayButton);
         resetSubjectButton = findViewById(R.id.resetSubjectButton);
+        importImageButton = findViewById(R.id.importImageButton);
+        importVideoButton = findViewById(R.id.importVideoButton);
+        greenBackgroundButton = findViewById(R.id.greenBackgroundButton);
         musicSeekBar = findViewById(R.id.musicSeekBar);
     }
 
@@ -180,6 +206,27 @@ public final class ClipMusicActivity extends AppCompatActivity {
             persistReadPermission(uri);
             loadMusic(uri);
         });
+
+        backgroundImagePicker = registerForActivityResult(
+                new ActivityResultContracts.OpenDocument(), uri -> {
+                    if (uri == null) return;
+                    persistReadPermission(uri);
+                    backgroundSpec.setImage(uri);
+                    showImageBackground(uri);
+                    decorStatus.setText("Image · " + readDisplayName(uri));
+                    Toast.makeText(this, "Image ajoutée derrière toi", Toast.LENGTH_SHORT).show();
+                });
+
+        backgroundVideoPicker = registerForActivityResult(
+                new ActivityResultContracts.OpenDocument(), uri -> {
+                    if (uri == null) return;
+                    persistReadPermission(uri);
+                    backgroundSpec.setVideo(uri);
+                    showVideoBackground(uri);
+                    decorStatus.setText("Vidéo · " + readDisplayName(uri));
+                    Toast.makeText(this, "Vidéo ajoutée derrière toi", Toast.LENGTH_SHORT).show();
+                });
+
         cameraPermissionLauncher = registerForActivityResult(
                 new ActivityResultContracts.RequestPermission(), granted -> {
                     if (granted) startCamera();
@@ -190,22 +237,43 @@ public final class ClipMusicActivity extends AppCompatActivity {
 
     private void setupControls() {
         findViewById(R.id.backButton).setOnClickListener(v -> finish());
+
+        importImageButton.setOnClickListener(v -> {
+            if (activeRecording == null) {
+                backgroundImagePicker.launch(new String[]{"image/*"});
+            }
+        });
+        importVideoButton.setOnClickListener(v -> {
+            if (activeRecording == null) {
+                backgroundVideoPicker.launch(new String[]{"video/*"});
+            }
+        });
+        greenBackgroundButton.setOnClickListener(v -> {
+            if (activeRecording != null) return;
+            backgroundSpec.setColor(Color.rgb(0, 255, 0));
+            showGreenBackground();
+            decorStatus.setText("Fond vert");
+        });
+
         importAudioButton.setOnClickListener(v -> {
             if (activeRecording == null) audioPicker.launch(new String[]{"audio/*"});
         });
         musicPlayButton.setOnClickListener(v -> toggleMusicPreview());
+
         qualityButton.setOnClickListener(v -> {
             if (activeRecording != null) return;
             quality = quality == 1080 ? 720 : 1080;
             qualityButton.setText(quality + "p");
             startCamera();
         });
+
         flipCameraButton.setOnClickListener(v -> {
             if (activeRecording != null) return;
             lensFacing = lensFacing == CameraSelector.LENS_FACING_FRONT
                     ? CameraSelector.LENS_FACING_BACK : CameraSelector.LENS_FACING_FRONT;
             startCamera();
         });
+
         resetSubjectButton.setOnClickListener(v -> subjectPreview.resetSubjectTransform());
         subjectPreview.setTransformListener((scale, centerX, centerY, gestureFinished) -> {
             int percent = Math.round(scale * 100f);
@@ -252,6 +320,52 @@ public final class ClipMusicActivity extends AppCompatActivity {
             else pauseClipRecording();
         });
         finishButton.setOnClickListener(v -> finishClipRecording());
+    }
+
+    private void showGreenBackground() {
+        try {
+            backgroundVideo.stopPlayback();
+        } catch (Exception ignored) {
+        }
+        backgroundVideo.setVisibility(View.GONE);
+        backgroundImage.setImageDrawable(null);
+        backgroundImage.setVisibility(View.GONE);
+        previewContainer.setBackgroundColor(Color.rgb(0, 255, 0));
+    }
+
+    private void showImageBackground(Uri uri) {
+        try {
+            backgroundVideo.stopPlayback();
+        } catch (Exception ignored) {
+        }
+        backgroundVideo.setVisibility(View.GONE);
+        previewContainer.setBackgroundColor(Color.BLACK);
+        backgroundImage.setImageURI(null);
+        backgroundImage.setImageURI(uri);
+        backgroundImage.setVisibility(View.VISIBLE);
+    }
+
+    private void showVideoBackground(Uri uri) {
+        backgroundImage.setImageDrawable(null);
+        backgroundImage.setVisibility(View.GONE);
+        previewContainer.setBackgroundColor(Color.BLACK);
+        backgroundVideo.setVisibility(View.VISIBLE);
+        try {
+            backgroundVideo.stopPlayback();
+        } catch (Exception ignored) {
+        }
+        backgroundVideo.setVideoURI(uri);
+        backgroundVideo.setOnPreparedListener(player -> {
+            player.setLooping(true);
+            player.setVolume(0f, 0f);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+                player.setVideoScalingMode(
+                        MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
+            }
+            if (activeRecording == null || !clipPaused) {
+                backgroundVideo.start();
+            }
+        });
     }
 
     private void loadMusic(Uri uri) {
@@ -386,6 +500,7 @@ public final class ClipMusicActivity extends AppCompatActivity {
 
             @Override
             public void onError(Exception error) {
+                // La prochaine image remplacera celle qui a été ignorée.
             }
         });
     }
@@ -409,13 +524,15 @@ public final class ClipMusicActivity extends AppCompatActivity {
             return;
         }
 
+        prepareBackgroundForRecording();
+
         File directory = getExternalFilesDir(Environment.DIRECTORY_MOVIES);
         if (directory == null) directory = getCacheDir();
         activeRawFile = new File(directory,
                 "clip_source_" + System.currentTimeMillis() + ".mp4");
         FileOutputOptions options = new FileOutputOptions.Builder(activeRawFile).build();
 
-        // IMPORTANT : aucun withAudioEnabled() ici. Le microphone n'entre jamais dans le clip.
+        // Aucun withAudioEnabled() : le microphone ne peut pas entrer dans le clip.
         PendingRecording pending = videoCapture.getOutput().prepareRecording(this, options);
         recordButton.setEnabled(false);
         try {
@@ -428,9 +545,7 @@ public final class ClipMusicActivity extends AppCompatActivity {
                     activeRecording = null;
                     clipPaused = false;
                     uiHandler.removeCallbacks(timerTick);
-                    if (musicPrepared && musicPlayer != null) {
-                        try { musicPlayer.pause(); } catch (IllegalStateException ignored) { }
-                    }
+                    pauseMusicAndBackground();
                     showIdleUi();
                     if (finalized.getError() == VideoRecordEvent.Finalize.ERROR_NONE
                             && activeRawFile != null && activeRawFile.exists()) {
@@ -448,6 +563,17 @@ public final class ClipMusicActivity extends AppCompatActivity {
         }
     }
 
+    private void prepareBackgroundForRecording() {
+        if (backgroundSpec.getType() == BackgroundSpec.Type.VIDEO
+                && backgroundVideo.getVisibility() == View.VISIBLE) {
+            try {
+                backgroundVideo.seekTo(0);
+                backgroundVideo.start();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
     private void beginClipSession() {
         recordingAccumulatedMs = 0L;
         activeSegmentStartedAt = SystemClock.elapsedRealtime();
@@ -459,7 +585,7 @@ public final class ClipMusicActivity extends AppCompatActivity {
         recordButton.setEnabled(true);
         finishButton.setVisibility(View.VISIBLE);
         finishButton.setEnabled(true);
-        importAudioButton.setEnabled(false);
+        setImportControlsEnabled(false);
         musicPlayButton.setEnabled(false);
         musicSeekBar.setEnabled(false);
         flipCameraButton.setEnabled(false);
@@ -469,6 +595,13 @@ public final class ClipMusicActivity extends AppCompatActivity {
             musicPlayer.seekTo(clipAudioStartMs);
             musicPlayer.start();
         } catch (IllegalStateException ignored) {
+        }
+        if (backgroundSpec.getType() == BackgroundSpec.Type.VIDEO) {
+            try {
+                backgroundVideo.seekTo(0);
+                backgroundVideo.start();
+            } catch (Exception ignored) {
+            }
         }
         uiHandler.removeCallbacks(timerTick);
         uiHandler.post(timerTick);
@@ -480,21 +613,34 @@ public final class ClipMusicActivity extends AppCompatActivity {
         activeSegmentStartedAt = 0L;
         clipPaused = true;
         recordSubjectTransform(true);
-        try { activeRecording.pause(); } catch (Exception ignored) { }
-        if (musicPrepared && musicPlayer != null) {
-            try { musicPlayer.pause(); } catch (IllegalStateException ignored) { }
+        try {
+            activeRecording.pause();
+        } catch (Exception ignored) {
         }
+        pauseMusicAndBackground();
         recordButton.setText("▶  REPRENDRE   " + formatDuration(recordingAccumulatedMs));
         clipStatus.setText("PAUSE · change de plan puis reprends");
     }
 
     private void resumeClipRecording() {
         if (activeRecording == null || !clipPaused) return;
-        try { activeRecording.resume(); } catch (Exception ignored) { }
+        try {
+            activeRecording.resume();
+        } catch (Exception ignored) {
+        }
         activeSegmentStartedAt = SystemClock.elapsedRealtime();
         clipPaused = false;
         if (musicPrepared && musicPlayer != null) {
-            try { musicPlayer.start(); } catch (IllegalStateException ignored) { }
+            try {
+                musicPlayer.start();
+            } catch (IllegalStateException ignored) {
+            }
+        }
+        if (backgroundSpec.getType() == BackgroundSpec.Type.VIDEO) {
+            try {
+                backgroundVideo.start();
+            } catch (Exception ignored) {
+            }
         }
         recordButton.setText("Ⅱ  PAUSE   " + formatDuration(recordingAccumulatedMs));
         clipStatus.setText("TOURNAGE · reprise exactement au même son");
@@ -506,13 +652,26 @@ public final class ClipMusicActivity extends AppCompatActivity {
         activeSegmentStartedAt = 0L;
         clipPaused = true;
         recordSubjectTransform(true);
-        if (musicPrepared && musicPlayer != null) {
-            try { musicPlayer.pause(); } catch (IllegalStateException ignored) { }
-        }
+        pauseMusicAndBackground();
         recordButton.setEnabled(false);
         finishButton.setEnabled(false);
         recordButton.setText("Finalisation…");
         activeRecording.stop();
+    }
+
+    private void pauseMusicAndBackground() {
+        if (musicPrepared && musicPlayer != null) {
+            try {
+                musicPlayer.pause();
+            } catch (IllegalStateException ignored) {
+            }
+        }
+        if (backgroundSpec.getType() == BackgroundSpec.Type.VIDEO) {
+            try {
+                if (backgroundVideo.isPlaying()) backgroundVideo.pause();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private long currentClipDurationMs() {
@@ -525,21 +684,32 @@ public final class ClipMusicActivity extends AppCompatActivity {
     private void enqueueClipExport(Uri sourceUri, File transformFile) {
         Data.Builder input = new Data.Builder()
                 .putString(VideoExportWorker.KEY_SOURCE_URI, sourceUri.toString())
-                .putString(VideoExportWorker.KEY_BACKGROUND_TYPE, BackgroundSpec.Type.COLOR.name())
-                .putInt(VideoExportWorker.KEY_BACKGROUND_COLOR, Color.rgb(0, 255, 0))
+                .putString(VideoExportWorker.KEY_BACKGROUND_TYPE,
+                        backgroundSpec.getType().name())
+                .putInt(VideoExportWorker.KEY_BACKGROUND_COLOR, backgroundSpec.getColor())
                 .putFloat(VideoExportWorker.KEY_THRESHOLD, threshold)
                 .putFloat(VideoExportWorker.KEY_SOFTNESS, softness)
                 .putInt(VideoExportWorker.KEY_QUALITY, quality)
                 .putBoolean(VideoExportWorker.KEY_MIRROR_SOURCE,
                         lensFacing == CameraSelector.LENS_FACING_FRONT)
-                .putFloat(VideoExportWorker.KEY_TRANSFORM_SCALE, subjectPreview.getSubjectScale())
-                .putFloat(VideoExportWorker.KEY_TRANSFORM_CENTER_X, subjectPreview.getSubjectCenterX())
-                .putFloat(VideoExportWorker.KEY_TRANSFORM_CENTER_Y, subjectPreview.getSubjectCenterY())
+                .putFloat(VideoExportWorker.KEY_TRANSFORM_SCALE,
+                        subjectPreview.getSubjectScale())
+                .putFloat(VideoExportWorker.KEY_TRANSFORM_CENTER_X,
+                        subjectPreview.getSubjectCenterX())
+                .putFloat(VideoExportWorker.KEY_TRANSFORM_CENTER_Y,
+                        subjectPreview.getSubjectCenterY())
                 .putString(VideoExportWorker.KEY_EXTERNAL_AUDIO_URI, musicUri.toString())
                 .putLong(VideoExportWorker.KEY_EXTERNAL_AUDIO_START_MS, clipAudioStartMs);
-        if (transformFile != null) {
-            input.putString(VideoExportWorker.KEY_TRANSFORM_PATH, transformFile.getAbsolutePath());
+
+        if (backgroundSpec.getUri() != null) {
+            input.putString(VideoExportWorker.KEY_BACKGROUND_URI,
+                    backgroundSpec.getUri().toString());
         }
+        if (transformFile != null) {
+            input.putString(VideoExportWorker.KEY_TRANSFORM_PATH,
+                    transformFile.getAbsolutePath());
+        }
+
         OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(VideoExportWorker.class)
                 .setInputData(input.build()).build();
         WorkManager.getInstance(this).enqueue(request);
@@ -547,7 +717,7 @@ public final class ClipMusicActivity extends AppCompatActivity {
     }
 
     private void observeExport(OneTimeWorkRequest request) {
-        showBusy(0, "Détourage et ajout de la musique…");
+        showBusy(0, "Détourage, décor et ajout de la musique…");
         WorkManager.getInstance(this).getWorkInfoByIdLiveData(request.getId())
                 .observe(this, info -> {
                     if (info == null) return;
@@ -557,7 +727,8 @@ public final class ClipMusicActivity extends AppCompatActivity {
                     text.setText("Création du clip… " + progress + "%");
                     if (info.getState() == WorkInfo.State.SUCCEEDED) {
                         hideBusy();
-                        String output = info.getOutputData().getString(VideoExportWorker.KEY_OUTPUT_URI);
+                        String output = info.getOutputData().getString(
+                                VideoExportWorker.KEY_OUTPUT_URI);
                         deleteRawRecording();
                         if (output != null) showSavedSnackbar(Uri.parse(output));
                     } else if (info.getState() == WorkInfo.State.FAILED
@@ -592,7 +763,8 @@ public final class ClipMusicActivity extends AppCompatActivity {
         recordSubjectTransform(true);
         recordingTransformActive = false;
         File directory = new File(getCacheDir(), "subject_transforms");
-        File file = new File(directory, "clip_movement_" + System.currentTimeMillis() + ".csv");
+        File file = new File(directory,
+                "clip_movement_" + System.currentTimeMillis() + ".csv");
         try {
             transformTimeline.write(file);
             return file;
@@ -607,17 +779,23 @@ public final class ClipMusicActivity extends AppCompatActivity {
         currentSource = source;
         subjectPreview.setSource(source);
         previewHint.setVisibility(View.GONE);
-        if (oldSource != null && oldSource != source && !oldSource.isRecycled()) oldSource.recycle();
+        if (oldSource != null && oldSource != source && !oldSource.isRecycled()) {
+            oldSource.recycle();
+        }
     }
 
     private void acceptMaskResult(SegmentationEngine.Result result) {
-        currentMask = result.mask;
-        currentMaskWidth = result.maskWidth;
-        currentMaskHeight = result.maskHeight;
-        subjectPreview.setMask(result.alphaMask, currentMask, currentMaskWidth,
-                currentMaskHeight, threshold, softness);
+        subjectPreview.setMask(result.alphaMask, result.mask, result.maskWidth,
+                result.maskHeight, threshold, softness);
         if (result.source != null && !result.source.isRecycled()) result.source.recycle();
         if (result.cutout != null && !result.cutout.isRecycled()) result.cutout.recycle();
+    }
+
+    private void setImportControlsEnabled(boolean enabled) {
+        importAudioButton.setEnabled(enabled);
+        importImageButton.setEnabled(enabled);
+        importVideoButton.setEnabled(enabled);
+        greenBackgroundButton.setEnabled(enabled);
     }
 
     private void showIdleUi() {
@@ -626,12 +804,19 @@ public final class ClipMusicActivity extends AppCompatActivity {
         recordButton.setEnabled(true);
         finishButton.setVisibility(View.GONE);
         finishButton.setEnabled(true);
-        importAudioButton.setEnabled(true);
+        setImportControlsEnabled(true);
         musicPlayButton.setEnabled(musicPrepared);
         musicSeekBar.setEnabled(musicPrepared);
         flipCameraButton.setEnabled(true);
         qualityButton.setEnabled(true);
         clipStatus.setText("Clip prêt · tu peux refaire une prise");
+        if (backgroundSpec.getType() == BackgroundSpec.Type.VIDEO
+                && backgroundVideo.getVisibility() == View.VISIBLE) {
+            try {
+                backgroundVideo.start();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void showBusy(int progress, String text) {
@@ -640,7 +825,11 @@ public final class ClipMusicActivity extends AppCompatActivity {
         processingOverlay.setVisibility(View.VISIBLE);
         recordButton.setEnabled(false);
         finishButton.setEnabled(false);
-        importAudioButton.setEnabled(false);
+        setImportControlsEnabled(false);
+        musicPlayButton.setEnabled(false);
+        musicSeekBar.setEnabled(false);
+        flipCameraButton.setEnabled(false);
+        qualityButton.setEnabled(false);
     }
 
     private void hideBusy() {
@@ -660,8 +849,9 @@ public final class ClipMusicActivity extends AppCompatActivity {
                     Intent intent = new Intent(Intent.ACTION_VIEW)
                             .setDataAndType(uri, "video/mp4")
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    try { startActivity(intent); }
-                    catch (Exception error) {
+                    try {
+                        startActivity(intent);
+                    } catch (Exception error) {
                         Toast.makeText(this, "Clip : " + uri, Toast.LENGTH_LONG).show();
                     }
                 }).show();
@@ -681,7 +871,7 @@ public final class ClipMusicActivity extends AppCompatActivity {
             }
         } catch (Exception ignored) {
         }
-        return "Musique sélectionnée";
+        return "Fichier sélectionné";
     }
 
     private void persistReadPermission(Uri uri) {
@@ -695,7 +885,10 @@ public final class ClipMusicActivity extends AppCompatActivity {
     private void releaseMusicPlayer() {
         musicPrepared = false;
         if (musicPlayer != null) {
-            try { musicPlayer.release(); } catch (Exception ignored) { }
+            try {
+                musicPlayer.release();
+            } catch (Exception ignored) {
+            }
             musicPlayer = null;
         }
     }
@@ -722,11 +915,22 @@ public final class ClipMusicActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (activeRecording == null
+                && backgroundSpec.getType() == BackgroundSpec.Type.VIDEO
+                && backgroundVideo.getVisibility() == View.VISIBLE) {
+            try {
+                backgroundVideo.start();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    @Override
     protected void onPause() {
         if (activeRecording != null) finishClipRecording();
-        if (musicPrepared && musicPlayer != null) {
-            try { musicPlayer.pause(); } catch (IllegalStateException ignored) { }
-        }
+        pauseMusicAndBackground();
         super.onPause();
     }
 
@@ -744,7 +948,11 @@ public final class ClipMusicActivity extends AppCompatActivity {
         subjectPreview.clearFrame();
         if (currentSource != null && !currentSource.isRecycled()) currentSource.recycle();
         currentSource = null;
-        currentMask = null;
+        try {
+            backgroundVideo.stopPlayback();
+        } catch (Exception ignored) {
+        }
+        backgroundImage.setImageDrawable(null);
         releaseMusicPlayer();
         super.onDestroy();
     }
