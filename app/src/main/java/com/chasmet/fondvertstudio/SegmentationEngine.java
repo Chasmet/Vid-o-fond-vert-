@@ -23,15 +23,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Moteur hybride de détourage.
- *
- * MODNet est prioritaire et fonctionne entièrement en local via ONNX Runtime. ML Kit est gardé
- * comme secours afin que la caméra reste utilisable si un appareil refuse le modèle ONNX.
+ * Détourage vidéo hybride.
+ * RVM MobileNetV3 + ncnn est prioritaire : ses quatre états récurrents suivent le sujet entre
+ * les images et évitent les disparitions brutales observées avec les modèles image-par-image.
+ * ML Kit reste uniquement un secours de compatibilité.
  */
 public final class SegmentationEngine implements AutoCloseable {
     public interface Callback {
         void onResult(Result result);
-
         void onError(Exception error);
     }
 
@@ -54,6 +53,11 @@ public final class SegmentationEngine implements AutoCloseable {
         }
     }
 
+    private static final int MLKIT_MAX_DIMENSION = 512;
+    private static final int STABILIZATION_NONE = 0;
+    private static final int STABILIZATION_STREAM = 1;
+    private static final int STABILIZATION_EXPORT = 2;
+
     private final Context appContext;
     private final Segmenter streamSegmenter;
     private final Segmenter stillSegmenter;
@@ -61,16 +65,12 @@ public final class SegmentationEngine implements AutoCloseable {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean streamBusy = new AtomicBoolean(false);
 
-    private static final int INFERENCE_MAX_DIMENSION = 512;
-    private static final int STABILIZATION_NONE = 0;
-    private static final int STABILIZATION_STREAM = 1;
-    private static final int STABILIZATION_EXPORT = 2;
-
     private volatile float threshold = 0.50f;
     private volatile float softness = 0.065f;
-    private volatile ModNetEngine modNet;
-    private volatile boolean modNetDisabled;
-    private volatile String backendName = "MODNet (initialisation)";
+    private volatile RvmNcnnEngine rvm;
+    private volatile boolean rvmDisabled;
+    private volatile int consecutiveRvmFailures;
+    private volatile String backendName = "RVM ncnn · initialisation";
 
     private float[] previousStreamMask;
     private int previousStreamWidth;
@@ -109,12 +109,20 @@ public final class SegmentationEngine implements AutoCloseable {
         previousStreamMask = null;
         previousStreamWidth = 0;
         previousStreamHeight = 0;
+        RvmNcnnEngine engine = rvm;
+        if (engine != null) {
+            try { engine.reset(); } catch (Throwable ignored) { }
+        }
     }
 
     public synchronized void resetExportHistory() {
         previousExportMask = null;
         previousExportWidth = 0;
         previousExportHeight = 0;
+        RvmNcnnEngine engine = rvm;
+        if (engine != null) {
+            try { engine.reset(); } catch (Throwable ignored) { }
+        }
     }
 
     public void processStream(Bitmap bitmap, @NonNull Callback callback) {
@@ -123,24 +131,31 @@ public final class SegmentationEngine implements AutoCloseable {
             return;
         }
         resultExecutor.execute(() -> {
-            ModNetEngine engine = getModNet();
+            RvmNcnnEngine engine = getRvm();
             if (engine != null) {
+                Bitmap inference = null;
                 try {
-                    ModNetEngine.Matte matte = engine.predict(
-                            bitmap, ModNetEngine.PREVIEW_SHORT_SIDE);
-                    float[] stable = stabilizeMatte(matte.alpha, matte.width, matte.height,
-                            STABILIZATION_STREAM);
+                    inference = BitmapUtils.scaleDown(bitmap,
+                            RvmNcnnEngine.PREVIEW_MAX_DIMENSION);
+                    RvmNcnnEngine.Matte matte = engine.predict(inference,
+                            RvmNcnnEngine.PREVIEW_MAX_DIMENSION, false);
                     Bitmap alphaMask = MattingMaskUtils.createAlphaMask(
-                            stable, matte.width, matte.height);
-                    Result result = new Result(bitmap, null, alphaMask, stable,
+                            matte.alpha, matte.width, matte.height);
+                    Result result = new Result(bitmap, null, alphaMask, matte.alpha,
                             matte.width, matte.height);
-                    backendName = "MODNet local · aperçu";
+                    consecutiveRvmFailures = 0;
+                    backendName = "RVM ncnn · suivi temporel";
                     streamBusy.set(false);
+                    if (inference != bitmap && inference != null && !inference.isRecycled()) {
+                        inference.recycle();
+                    }
                     mainHandler.post(() -> callback.onResult(result));
                     return;
-                } catch (Throwable ignored) {
-                    disableModNetAfterNativeFailure();
-                    // ML Kit prend immédiatement le relais sur ce frame.
+                } catch (Throwable error) {
+                    if (inference != bitmap && inference != null && !inference.isRecycled()) {
+                        inference.recycle();
+                    }
+                    noteRvmFailure();
                 }
             }
             processStreamWithMlKit(bitmap, callback);
@@ -150,7 +165,7 @@ public final class SegmentationEngine implements AutoCloseable {
     private void processStreamWithMlKit(Bitmap bitmap, @NonNull Callback callback) {
         final Bitmap inferenceBitmap;
         try {
-            inferenceBitmap = BitmapUtils.scaleDown(bitmap, INFERENCE_MAX_DIMENSION);
+            inferenceBitmap = BitmapUtils.scaleDown(bitmap, MLKIT_MAX_DIMENSION);
         } catch (Exception error) {
             streamBusy.set(false);
             bitmap.recycle();
@@ -187,22 +202,24 @@ public final class SegmentationEngine implements AutoCloseable {
 
     public void processStill(Bitmap bitmap, @NonNull Callback callback) {
         resultExecutor.execute(() -> {
-            ModNetEngine engine = getModNet();
+            RvmNcnnEngine engine = getRvm();
             if (engine != null) {
                 try {
-                    ModNetEngine.Matte matte = engine.predict(
-                            bitmap, ModNetEngine.EXPORT_SHORT_SIDE);
-                    float[] refined = stabilizeMatte(matte.alpha, matte.width, matte.height,
-                            STABILIZATION_NONE);
+                    engine.reset();
+                    RvmNcnnEngine.Matte matte = engine.predict(bitmap,
+                            RvmNcnnEngine.EXPORT_TARGET_SIZE, true);
                     Bitmap cutout = MattingMaskUtils.applyMask(
-                            bitmap, refined, matte.width, matte.height);
-                    backendName = "MODNet local · qualité";
-                    Result result = new Result(bitmap, cutout, null, refined,
+                            bitmap, matte.alpha, matte.width, matte.height);
+                    engine.reset();
+                    consecutiveRvmFailures = 0;
+                    backendName = "RVM ncnn · haute qualité";
+                    Result result = new Result(bitmap, cutout, null, matte.alpha,
                             matte.width, matte.height);
                     mainHandler.post(() -> callback.onResult(result));
                     return;
-                } catch (Throwable ignored) {
-                    disableModNetAfterNativeFailure();
+                } catch (Throwable error) {
+                    noteRvmFailure();
+                    try { engine.reset(); } catch (Throwable ignored) { }
                 }
             }
             processStillWithMlKit(bitmap, callback);
@@ -212,7 +229,7 @@ public final class SegmentationEngine implements AutoCloseable {
     private void processStillWithMlKit(Bitmap bitmap, @NonNull Callback callback) {
         Bitmap inferenceBitmap = null;
         try {
-            inferenceBitmap = BitmapUtils.scaleDown(bitmap, INFERENCE_MAX_DIMENSION);
+            inferenceBitmap = BitmapUtils.scaleDown(bitmap, MLKIT_MAX_DIMENSION);
             SegmentationMask mask = Tasks.await(
                     stillSegmenter.process(InputImage.fromBitmap(inferenceBitmap, 0)),
                     60, TimeUnit.SECONDS);
@@ -231,26 +248,29 @@ public final class SegmentationEngine implements AutoCloseable {
         }
     }
 
+    /**
+     * Appelé image par image pendant l'export : contrairement au mode photo, on ne réinitialise
+     * surtout pas RVM afin de conserver la mémoire temporelle sur toute la séquence.
+     */
     public Result processStillBlocking(Bitmap bitmap, float localThreshold,
                                        float localSoftness) throws Exception {
-        ModNetEngine engine = getModNet();
+        RvmNcnnEngine engine = getRvm();
         if (engine != null) {
             try {
-                ModNetEngine.Matte matte = engine.predict(
-                        bitmap, ModNetEngine.EXPORT_SHORT_SIDE);
-                float[] stable = stabilizeMatte(matte.alpha, matte.width, matte.height,
-                        STABILIZATION_EXPORT);
+                RvmNcnnEngine.Matte matte = engine.predict(bitmap,
+                        RvmNcnnEngine.EXPORT_TARGET_SIZE, true);
                 Bitmap alphaMask = MattingMaskUtils.createAlphaMask(
-                        stable, matte.width, matte.height);
-                backendName = "MODNet local · export 512";
-                return new Result(bitmap, null, alphaMask, stable,
+                        matte.alpha, matte.width, matte.height);
+                consecutiveRvmFailures = 0;
+                backendName = "RVM ncnn · export temporel HQ";
+                return new Result(bitmap, null, alphaMask, matte.alpha,
                         matte.width, matte.height);
-            } catch (Throwable ignored) {
-                disableModNetAfterNativeFailure();
+            } catch (Throwable error) {
+                noteRvmFailure();
             }
         }
 
-        Bitmap inferenceBitmap = BitmapUtils.scaleDown(bitmap, INFERENCE_MAX_DIMENSION);
+        Bitmap inferenceBitmap = BitmapUtils.scaleDown(bitmap, MLKIT_MAX_DIMENSION);
         try {
             SegmentationMask mask = Tasks.await(
                     stillSegmenter.process(InputImage.fromBitmap(inferenceBitmap, 0)),
@@ -265,29 +285,34 @@ public final class SegmentationEngine implements AutoCloseable {
         }
     }
 
-    private synchronized ModNetEngine getModNet() {
-        if (modNetDisabled) return null;
-        if (modNet != null && modNet.isReady()) return modNet;
+    private synchronized RvmNcnnEngine getRvm() {
+        if (rvmDisabled) return null;
+        if (rvm != null && rvm.isReady()) return rvm;
         try {
-            modNet = new ModNetEngine(appContext);
-            backendName = "MODNet local";
-            return modNet;
+            rvm = new RvmNcnnEngine(appContext);
+            consecutiveRvmFailures = 0;
+            backendName = "RVM ncnn · prêt";
+            return rvm;
         } catch (Throwable error) {
-            disableModNetAfterNativeFailure();
+            rvmDisabled = true;
+            backendName = "ML Kit secours";
             return null;
         }
     }
 
-    private synchronized void disableModNetAfterNativeFailure() {
-        modNetDisabled = true;
-        backendName = "ML Kit secours";
-        ModNetEngine engine = modNet;
-        modNet = null;
+    private synchronized void noteRvmFailure() {
+        consecutiveRvmFailures++;
+        RvmNcnnEngine engine = rvm;
         if (engine != null) {
-            try {
-                engine.close();
-            } catch (Throwable ignored) {
+            try { engine.reset(); } catch (Throwable ignored) { }
+        }
+        if (consecutiveRvmFailures >= 3) {
+            rvmDisabled = true;
+            if (engine != null) {
+                try { engine.close(); } catch (Throwable ignored) { }
             }
+            rvm = null;
+            backendName = "ML Kit secours";
         }
     }
 
@@ -313,38 +338,6 @@ public final class SegmentationEngine implements AutoCloseable {
         return new Result(bitmap, cutout, alphaMask, mask, maskWidth, maskHeight);
     }
 
-    /** Stabilisation douce adaptée aux alphas MODNet : conserve cheveux et semi-transparences. */
-    private synchronized float[] stabilizeMatte(float[] current, int width, int height,
-                                                int mode) {
-        if (mode == STABILIZATION_NONE) return current.clone();
-        boolean export = mode == STABILIZATION_EXPORT;
-        float[] previous = export ? previousExportMask : previousStreamMask;
-        int previousWidth = export ? previousExportWidth : previousStreamWidth;
-        int previousHeight = export ? previousExportHeight : previousStreamHeight;
-        float[] stable = new float[current.length];
-
-        if (previous == null || previousWidth != width || previousHeight != height
-                || previous.length != current.length) {
-            System.arraycopy(current, 0, stable, 0, current.length);
-        } else {
-            for (int i = 0; i < current.length; i++) {
-                float value = clamp(current[i]);
-                float history = clamp(previous[i]);
-                float difference = Math.abs(value - history);
-                float historyWeight;
-                if (difference < 0.025f) historyWeight = export ? 0.48f : 0.38f;
-                else if (difference < 0.07f) historyWeight = export ? 0.35f : 0.27f;
-                else if (difference < 0.15f) historyWeight = export ? 0.18f : 0.13f;
-                else historyWeight = 0.025f;
-                if (value < history && difference > 0.07f) historyWeight *= 0.45f;
-                stable[i] = clamp(value * (1f - historyWeight) + history * historyWeight);
-            }
-        }
-        saveHistory(stable, width, height, export);
-        return stable;
-    }
-
-    /** Ancienne stabilisation conservée uniquement pour le fallback ML Kit. */
     private synchronized float[] stabilizeMlKitMask(float[] current, int width, int height,
                                                     int mode) {
         boolean export = mode == STABILIZATION_EXPORT;
@@ -362,31 +355,16 @@ public final class SegmentationEngine implements AutoCloseable {
                 float history = previous[index];
                 float difference = Math.abs(value - history);
                 float historyWeight;
-                if (difference < 0.035f) {
-                    historyWeight = export ? 0.44f : 0.38f;
-                } else if (difference < 0.08f) {
-                    historyWeight = export ? 0.34f : 0.29f;
-                } else if (difference < 0.16f) {
-                    historyWeight = export ? 0.19f : 0.16f;
-                } else if (difference < 0.28f) {
-                    historyWeight = 0.055f;
-                } else {
-                    historyWeight = 0.012f;
-                }
+                if (difference < 0.035f) historyWeight = export ? 0.44f : 0.38f;
+                else if (difference < 0.08f) historyWeight = export ? 0.34f : 0.29f;
+                else if (difference < 0.16f) historyWeight = export ? 0.19f : 0.16f;
+                else if (difference < 0.28f) historyWeight = 0.055f;
+                else historyWeight = 0.012f;
                 if (value < history && difference > 0.08f) historyWeight *= 0.55f;
-                float blended = value * (1f - historyWeight) + history * historyWeight;
-                if (difference > 0.12f) {
-                    float motion = Math.min(1f, (difference - 0.12f) / 0.40f);
-                    blended = clamp(0.5f + (blended - 0.5f) * (1f + 0.14f * motion));
-                }
-                stable[index] = clamp(blended);
+                stable[index] = clamp(value * (1f - historyWeight) + history * historyWeight);
             }
         }
-        saveHistory(stable, width, height, export);
-        return stable;
-    }
 
-    private void saveHistory(float[] stable, int width, int height, boolean export) {
         if (export) {
             previousExportMask = stable;
             previousExportWidth = width;
@@ -396,6 +374,7 @@ public final class SegmentationEngine implements AutoCloseable {
             previousStreamWidth = width;
             previousStreamHeight = height;
         }
+        return stable;
     }
 
     private static float clamp(float value) {
@@ -406,13 +385,9 @@ public final class SegmentationEngine implements AutoCloseable {
     public void close() {
         streamSegmenter.close();
         stillSegmenter.close();
-        ModNetEngine engine = modNet;
-        modNet = null;
+        RvmNcnnEngine engine = rvm;
         if (engine != null) {
-            try {
-                engine.close();
-            } catch (Throwable ignored) {
-            }
+            try { engine.close(); } catch (Throwable ignored) { }
         }
         resultExecutor.shutdownNow();
     }

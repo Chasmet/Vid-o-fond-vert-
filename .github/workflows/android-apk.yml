@@ -14,7 +14,7 @@ jobs:
   build:
     name: Fond Vert Studio APK
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     steps:
       - name: Récupérer le dépôt
@@ -26,27 +26,34 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Installer NDK et CMake
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" "cmake;3.22.1" >/dev/null
+
       - name: Préparer Gradle
         uses: gradle/actions/setup-gradle@v4
 
       - name: Autoriser Gradle
         run: chmod +x gradlew
 
-      - name: Compiler et tester l'APK avec MODNet
+      - name: Compiler et tester l'APK avec RVM ncnn
         run: ./gradlew --no-daemon clean assembleDebug lintDebug
 
-      - name: Vérifier que MODNet est embarqué
+      - name: Vérifier RVM et le moteur natif
         run: |
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/modnet_photographic.onnx"
-          echo "MODNet présent dans l'APK"
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/rvm_mobilenetv3.ncnn.param"
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "assets/rvm_mobilenetv3.ncnn.bin"
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/arm64-v8a/librvmncnn.so"
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/armeabi-v7a/librvmncnn.so"
+          echo "RVM MobileNetV3 + ncnn présents dans l'APK"
 
       - name: Nommer l'APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.7.0-MODNet-Local.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk Fond-Vert-Studio-v1.8.0-RVM-ncnn.apk
 
       - name: Publier l'APK
         uses: actions/upload-artifact@v4
         with:
           name: Fond-Vert-Studio-APK
-          path: Fond-Vert-Studio-v1.7.0-MODNet-Local.apk
+          path: Fond-Vert-Studio-v1.8.0-RVM-ncnn.apk
           if-no-files-found: error
           retention-days: 30
