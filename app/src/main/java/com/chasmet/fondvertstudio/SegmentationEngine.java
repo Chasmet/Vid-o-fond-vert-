@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 
 import androidx.annotation.NonNull;
 
@@ -23,12 +24,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Détourage vidéo hybride haute qualité, avec chemin preview faible latence.
+ * Deux moteurs séparés selon le besoin.
  *
- * Le rendu final conserve RVM + guide humain sur chaque image. Pendant la caméra, RVM tourne
- * seul dans la boucle critique et consomme le dernier guide humain disponible. Ce guide est
- * recalculé en parallèle à basse résolution toutes les quelques images : on évite ainsi
- * d'additionner la latence ML Kit à celle de RVM à chaque frame.
+ * APERÇU : PP-HumanSegV2-Lite 192x192, sans RVM ni double inférence ML Kit dans la boucle.
+ * EXPORT/PHOTO : RVM + guide humain, plus lent mais beaucoup plus précis.
  */
 public final class SegmentationEngine implements AutoCloseable {
     public interface Callback {
@@ -68,38 +67,26 @@ public final class SegmentationEngine implements AutoCloseable {
     }
 
     private static final int MLKIT_MAX_DIMENSION = 512;
-    private static final int GUIDE_MAX_DIMENSION = 192;
-    private static final int GUIDE_EVERY_N_PREVIEW_FRAMES = 4;
     private static final int STABILIZATION_NONE = 0;
     private static final int STABILIZATION_STREAM = 1;
     private static final int STABILIZATION_EXPORT = 2;
 
     private final Context appContext;
     private final Segmenter streamSegmenter;
-    private final Segmenter guideSegmenter;
     private final Segmenter stillSegmenter;
     private final ExecutorService resultExecutor = Executors.newSingleThreadExecutor();
-    private final ExecutorService guideExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean streamBusy = new AtomicBoolean(false);
-    private final AtomicBoolean guideBusy = new AtomicBoolean(false);
 
     private volatile float threshold = 0.50f;
     private volatile float softness = 0.065f;
+
+    private volatile PpHumanSegEngine previewEngine;
+    private volatile boolean previewEngineDisabled;
     private volatile RvmNcnnEngine rvm;
     private volatile boolean rvmDisabled;
     private volatile int consecutiveRvmFailures;
-    private volatile String backendName = "RVM temps réel · initialisation";
-
-    private volatile SemanticMask latestPreviewGuide;
-    private volatile long latestPreviewGuideVersion;
-    private volatile long streamGeneration;
-    private int previewFrameCounter;
-    private long preparedGuideVersion = -1L;
-    private int preparedGuideWidth;
-    private int preparedGuideHeight;
-    private float[] preparedGuideValues;
-    private float[] preparedGuideSupport;
+    private volatile String backendName = "PP-HumanSegV2 · initialisation";
 
     private float[] previousStreamMask;
     private int previousStreamWidth;
@@ -119,7 +106,6 @@ public final class SegmentationEngine implements AutoCloseable {
                 .enableRawSizeMask()
                 .build();
         streamSegmenter = Segmentation.getClient(streamOptions);
-        guideSegmenter = Segmentation.getClient(streamOptions);
         stillSegmenter = Segmentation.getClient(stillOptions);
     }
 
@@ -140,12 +126,7 @@ public final class SegmentationEngine implements AutoCloseable {
         previousStreamMask = null;
         previousStreamWidth = 0;
         previousStreamHeight = 0;
-        previewFrameCounter = 0;
-        streamGeneration++;
-        latestPreviewGuide = null;
-        latestPreviewGuideVersion++;
-        clearPreparedPreviewGuide();
-        RvmNcnnEngine engine = rvm;
+        PpHumanSegEngine engine = previewEngine;
         if (engine != null) {
             try { engine.reset(); } catch (Throwable ignored) { }
         }
@@ -162,128 +143,67 @@ public final class SegmentationEngine implements AutoCloseable {
         }
     }
 
+    /**
+     * Boucle caméra faible latence : UNE seule IA, PP-HumanSegV2-Lite.
+     * L'image et le masque publiés proviennent strictement de la même frame.
+     */
     public void processStream(Bitmap bitmap, @NonNull Callback callback) {
         if (!streamBusy.compareAndSet(false, true)) {
             bitmap.recycle();
             return;
         }
         resultExecutor.execute(() -> {
-            RvmNcnnEngine engine = getRvm();
+            PpHumanSegEngine engine = getPreviewEngine();
             if (engine != null) {
-                Bitmap inference = null;
-                RvmNcnnEngine.Matte matte = null;
                 try {
-                    inference = BitmapUtils.scaleDown(bitmap,
-                            RvmNcnnEngine.PREVIEW_MAX_DIMENSION);
-                    previewFrameCounter++;
-                    maybeSchedulePreviewGuide(inference, previewFrameCounter);
+                    long startedAt = SystemClock.elapsedRealtime();
+                    PpHumanSegEngine.Matte matte = engine.predict(bitmap);
+                    Bitmap alphaMask = BitmapUtils.createAlphaMask(
+                            matte.alpha, matte.width, matte.height,
+                            threshold, Math.max(0.085f, softness));
 
-                    long startedAt = android.os.SystemClock.elapsedRealtime();
-                    matte = engine.predict(inference,
-                            RvmNcnnEngine.PREVIEW_MAX_DIMENSION, false);
-                    float[] fused = fuseWithCachedPreviewGuide(matte.alpha,
+                    // Transfert de propriété au View : aucune seconde Bitmap caméra à fabriquer.
+                    MaskedCameraView.publishProcessedForeground(bitmap);
+                    Result result = new Result(null, null, alphaMask, matte.alpha,
                             matte.width, matte.height);
-                    Bitmap alphaMask = MattingMaskUtils.createAlphaMask(
-                            fused, matte.width, matte.height);
-
-                    // Foreground et alpha proviennent strictement de la même frame RVM.
-                    MaskedCameraView.publishProcessedForeground(matte.foreground);
-                    matte = null;
-
-                    Result result = new Result(bitmap, null, alphaMask, fused,
-                            alphaMask.getWidth(), alphaMask.getHeight());
-                    consecutiveRvmFailures = 0;
-                    long latency = Math.max(0L,
-                            android.os.SystemClock.elapsedRealtime() - startedAt);
-                    backendName = "RVM temps réel · " + latency + " ms";
+                    backendName = "PP-HumanSegV2 · "
+                            + Math.max(matte.latencyMs,
+                            SystemClock.elapsedRealtime() - startedAt) + " ms";
                     streamBusy.set(false);
-                    if (inference != bitmap && inference != null && !inference.isRecycled()) {
-                        inference.recycle();
-                    }
                     mainHandler.post(() -> callback.onResult(result));
                     return;
                 } catch (Throwable error) {
-                    if (matte != null && matte.foreground != null
-                            && !matte.foreground.isRecycled()) {
-                        matte.foreground.recycle();
+                    previewEngineDisabled = true;
+                    PpHumanSegEngine failed = previewEngine;
+                    previewEngine = null;
+                    if (failed != null) {
+                        try { failed.close(); } catch (Throwable ignored) { }
                     }
-                    if (inference != bitmap && inference != null && !inference.isRecycled()) {
-                        inference.recycle();
-                    }
-                    noteRvmFailure();
+                    MaskedCameraView.clearPublishedForeground();
                 }
             }
             processStreamWithMlKit(bitmap, callback);
         });
     }
 
-    /**
-     * Lance le guide sémantique hors de la boucle RVM. Une image de guide en cours n'en bloque
-     * jamais une nouvelle frame RVM : au pire le dernier guide valide est réutilisé.
-     */
-    private void maybeSchedulePreviewGuide(Bitmap bitmap, int frameNumber) {
-        if (frameNumber != 1 && frameNumber % GUIDE_EVERY_N_PREVIEW_FRAMES != 0) return;
-        if (!guideBusy.compareAndSet(false, true)) return;
-
-        final long generation = streamGeneration;
-        final Bitmap guideBitmap;
+    private synchronized PpHumanSegEngine getPreviewEngine() {
+        if (previewEngineDisabled) return null;
+        if (previewEngine != null) return previewEngine;
         try {
-            Bitmap scaled = BitmapUtils.scaleDown(bitmap, GUIDE_MAX_DIMENSION);
-            guideBitmap = scaled == bitmap
-                    ? bitmap.copy(Bitmap.Config.ARGB_8888, false) : scaled;
+            previewEngine = new PpHumanSegEngine(appContext);
+            backendName = "PP-HumanSegV2 · prêt";
+            return previewEngine;
         } catch (Throwable error) {
-            guideBusy.set(false);
-            return;
+            previewEngineDisabled = true;
+            backendName = "ML Kit secours aperçu";
+            return null;
         }
-
-        guideExecutor.execute(() -> {
-            try {
-                SegmentationMask mask = Tasks.await(
-                        guideSegmenter.process(InputImage.fromBitmap(guideBitmap, 0)),
-                        3, TimeUnit.SECONDS);
-                SemanticMask semantic = readMask(mask);
-                if (generation == streamGeneration) {
-                    latestPreviewGuide = semantic;
-                    latestPreviewGuideVersion++;
-                }
-            } catch (Throwable ignored) {
-                // RVM continue avec le dernier guide disponible.
-            } finally {
-                if (!guideBitmap.isRecycled()) guideBitmap.recycle();
-                guideBusy.set(false);
-            }
-        });
-    }
-
-    private float[] fuseWithCachedPreviewGuide(float[] rvmAlpha, int width, int height) {
-        SemanticMask guide = latestPreviewGuide;
-        if (guide == null) return rvmAlpha.clone();
-        long version = latestPreviewGuideVersion;
-        if (preparedGuideValues == null || preparedGuideSupport == null
-                || preparedGuideVersion != version
-                || preparedGuideWidth != width || preparedGuideHeight != height) {
-            preparedGuideValues = resizeMask(guide.values, guide.width, guide.height,
-                    width, height);
-            preparedGuideSupport = dilateSoft(preparedGuideValues, width, height, 2);
-            preparedGuideWidth = width;
-            preparedGuideHeight = height;
-            preparedGuideVersion = version;
-        }
-        return fuseAlpha(rvmAlpha, preparedGuideValues, preparedGuideSupport);
-    }
-
-    private void clearPreparedPreviewGuide() {
-        preparedGuideValues = null;
-        preparedGuideSupport = null;
-        preparedGuideWidth = 0;
-        preparedGuideHeight = 0;
-        preparedGuideVersion = -1L;
     }
 
     private void processStreamWithMlKit(Bitmap bitmap, @NonNull Callback callback) {
         final Bitmap inferenceBitmap;
         try {
-            inferenceBitmap = BitmapUtils.scaleDown(bitmap, MLKIT_MAX_DIMENSION);
+            inferenceBitmap = BitmapUtils.scaleDown(bitmap, 384);
         } catch (Exception error) {
             streamBusy.set(false);
             bitmap.recycle();
@@ -296,7 +216,7 @@ public final class SegmentationEngine implements AutoCloseable {
                     try {
                         Result result = makeMlKitResult(bitmap, mask, threshold, softness,
                                 false, STABILIZATION_STREAM);
-                        backendName = "ML Kit secours";
+                        backendName = "ML Kit secours aperçu";
                         mainHandler.post(() -> callback.onResult(result));
                     } catch (Exception error) {
                         bitmap.recycle();
@@ -318,6 +238,7 @@ public final class SegmentationEngine implements AutoCloseable {
                 });
     }
 
+    /** Photo : on privilégie la qualité au temps de calcul. */
     public void processStill(Bitmap bitmap, @NonNull Callback callback) {
         resultExecutor.execute(() -> {
             RvmNcnnEngine engine = getRvm();
@@ -334,7 +255,7 @@ public final class SegmentationEngine implements AutoCloseable {
                     matte = null;
                     engine.reset();
                     consecutiveRvmFailures = 0;
-                    backendName = "RVM + humain · photo HQ";
+                    backendName = "RVM · photo HQ";
                     Result result = new Result(bitmap, cutout, null, fused,
                             bitmap.getWidth(), bitmap.getHeight());
                     mainHandler.post(() -> callback.onResult(result));
@@ -372,7 +293,7 @@ public final class SegmentationEngine implements AutoCloseable {
         }
     }
 
-    /** Appelé séquentiellement sur toutes les frames exportées : RVM garde sa mémoire. */
+    /** Export vidéo séquentiel : RVM conserve sa mémoire temporelle entre les frames. */
     public Result processStillBlocking(Bitmap bitmap, float localThreshold,
                                        float localSoftness) throws Exception {
         RvmNcnnEngine engine = getRvm();
@@ -388,7 +309,7 @@ public final class SegmentationEngine implements AutoCloseable {
                 matte = null;
                 if (bitmap != cleanForeground && !bitmap.isRecycled()) bitmap.recycle();
                 consecutiveRvmFailures = 0;
-                backendName = "RVM + humain · export HQ";
+                backendName = "RVM · export HQ";
                 return new Result(cleanForeground, null, alphaMask, fused,
                         alphaMask.getWidth(), alphaMask.getHeight());
             } catch (Throwable error) {
@@ -403,7 +324,7 @@ public final class SegmentationEngine implements AutoCloseable {
             SegmentationMask mask = Tasks.await(
                     stillSegmenter.process(InputImage.fromBitmap(inferenceBitmap, 0)),
                     60, TimeUnit.SECONDS);
-            backendName = "ML Kit secours";
+            backendName = "ML Kit secours export";
             return makeMlKitResult(bitmap, mask, localThreshold, localSoftness,
                     false, STABILIZATION_EXPORT);
         } finally {
@@ -413,7 +334,6 @@ public final class SegmentationEngine implements AutoCloseable {
         }
     }
 
-    /** Rendu photo/export : guide humain recalculé pour chaque frame, sans compromis qualité. */
     private float[] fuseWithSemanticGuide(float[] rvmAlpha, int width, int height,
                                           Bitmap bitmap) {
         try {
@@ -434,13 +354,10 @@ public final class SegmentationEngine implements AutoCloseable {
             float alpha = clamp(rvmAlpha[i]);
             float person = clamp(semantic[i]);
             float nearbyPerson = clamp(support[i]);
-
             float supportGate = smoothStep(0.045f, 0.34f, nearbyPerson);
             float value = alpha * supportGate;
-
             float core = smoothStep(0.58f, 0.90f, person);
             value = Math.max(value, core * 0.965f);
-
             if (alpha > 0.52f && nearbyPerson > 0.12f) {
                 value = Math.max(value, alpha * 0.90f);
             }
@@ -532,11 +449,9 @@ public final class SegmentationEngine implements AutoCloseable {
         try {
             rvm = new RvmNcnnEngine(appContext);
             consecutiveRvmFailures = 0;
-            backendName = "RVM temps réel · prêt";
             return rvm;
         } catch (Throwable error) {
             rvmDisabled = true;
-            backendName = "ML Kit secours";
             return null;
         }
     }
@@ -553,12 +468,11 @@ public final class SegmentationEngine implements AutoCloseable {
                 try { engine.close(); } catch (Throwable ignored) { }
             }
             rvm = null;
-            backendName = "ML Kit secours";
         }
     }
 
     private Result makeMlKitResult(Bitmap bitmap, SegmentationMask segmentationMask,
-                                   float threshold, float softness,
+                                   float localThreshold, float localSoftness,
                                    boolean createCutout, int stabilizationMode) {
         SemanticMask semantic = readMask(segmentationMask);
         float[] mask = semantic.values;
@@ -567,10 +481,10 @@ public final class SegmentationEngine implements AutoCloseable {
         }
         Bitmap cutout = createCutout
                 ? BitmapUtils.applyMask(bitmap, mask, semantic.width, semantic.height,
-                threshold, softness)
+                localThreshold, localSoftness)
                 : null;
         Bitmap alphaMask = createCutout ? null : BitmapUtils.createAlphaMask(
-                mask, semantic.width, semantic.height, threshold, softness);
+                mask, semantic.width, semantic.height, localThreshold, localSoftness);
         return new Result(bitmap, cutout, alphaMask, mask,
                 semantic.width, semantic.height);
     }
@@ -582,7 +496,6 @@ public final class SegmentationEngine implements AutoCloseable {
         int previousWidth = export ? previousExportWidth : previousStreamWidth;
         int previousHeight = export ? previousExportHeight : previousStreamHeight;
         float[] stable = new float[current.length];
-
         if (previous == null || previousWidth != width || previousHeight != height
                 || previous.length != current.length) {
             System.arraycopy(current, 0, stable, 0, current.length);
@@ -601,7 +514,6 @@ public final class SegmentationEngine implements AutoCloseable {
                 stable[index] = clamp(value * (1f - historyWeight) + history * historyWeight);
             }
         }
-
         if (export) {
             previousExportMask = stable;
             previousExportWidth = width;
@@ -627,16 +539,17 @@ public final class SegmentationEngine implements AutoCloseable {
 
     @Override
     public void close() {
-        streamGeneration++;
         streamSegmenter.close();
-        guideSegmenter.close();
         stillSegmenter.close();
         MaskedCameraView.clearPublishedForeground();
-        RvmNcnnEngine engine = rvm;
-        if (engine != null) {
-            try { engine.close(); } catch (Throwable ignored) { }
+        PpHumanSegEngine preview = previewEngine;
+        if (preview != null) {
+            try { preview.close(); } catch (Throwable ignored) { }
+        }
+        RvmNcnnEngine export = rvm;
+        if (export != null) {
+            try { export.close(); } catch (Throwable ignored) { }
         }
         resultExecutor.shutdownNow();
-        guideExecutor.shutdownNow();
     }
 }
