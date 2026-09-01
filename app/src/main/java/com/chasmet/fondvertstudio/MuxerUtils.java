@@ -7,6 +7,7 @@ import android.media.MediaFormat;
 import android.media.MediaMuxer;
 import android.net.Uri;
 
+import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 
 import java.io.File;
@@ -15,7 +16,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-@UnstableApi
+@OptIn(markerClass = UnstableApi.class)
 final class MuxerUtils {
     private static final String MIME_AAC = "audio/mp4a-latm";
 
