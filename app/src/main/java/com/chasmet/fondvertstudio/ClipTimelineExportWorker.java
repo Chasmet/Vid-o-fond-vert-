@@ -37,6 +37,8 @@ public final class ClipTimelineExportWorker extends Worker {
     public static final String KEY_OUTPUT_FILE = "output_file";
     public static final String KEY_ERROR = "error";
 
+    private static final int SOURCE_BATCH_SIZE = 8;
+
     public ClipTimelineExportWorker(@NonNull Context appContext,
                                     @NonNull WorkerParameters workerParams) {
         super(appContext, workerParams);
@@ -98,6 +100,7 @@ public final class ClipTimelineExportWorker extends Worker {
         H264FrameEncoder encoder = null;
         boolean keepFinal = false;
         try {
+            setProgressAsync(new Data.Builder().putInt(KEY_PROGRESS, 1).build());
             ArrayList<SourceInfo> infos = inspectSources(sourceTimeline);
             SourceInfo first = infos.get(0);
             int maxWidth = first.width >= first.height ? quality * 16 / 9 : quality;
@@ -119,28 +122,32 @@ public final class ClipTimelineExportWorker extends Worker {
             encoder = new H264FrameEncoder(videoOnly, outputWidth, outputHeight, frameRate);
             BitmapUtils.AlphaMaskFlattener maskFlattener =
                     new BitmapUtils.AlphaMaskFlattener(outputWidth, outputHeight);
+            setProgressAsync(new Data.Builder().putInt(KEY_PROGRESS, 3).build());
 
             long globalFrame = 0L;
             for (int segmentIndex = 0; segmentIndex < infos.size(); segmentIndex++) {
                 if (isStopped()) throw new IOException("Montage annulé");
                 SourceInfo info = infos.get(segmentIndex);
                 ClipSourceTimeline.Segment segment = info.segment;
-                MediaMetadataRetriever retriever = new MediaMetadataRetriever();
                 BackgroundProvider background = null;
+                SourceFrameProvider sourceFrames = null;
                 try {
-                    retriever.setDataSource(segment.sourcePath);
+                    long segmentFrames = Math.max(1L,
+                            (long) Math.ceil(info.durationUs * frameRate / 1_000_000d));
+                    sourceFrames = new SourceFrameProvider(info, segmentFrames);
                     background = new BackgroundProvider(context, segment.backgroundType,
                             segment.backgroundUri, segment.backgroundColor,
                             Math.max(outputWidth, outputHeight));
-                    long segmentFrames = Math.max(1L,
-                            (long) Math.ceil(info.durationUs * frameRate / 1_000_000d));
+
+                    // Un nouveau plan ne doit jamais hériter du masque temporel du précédent.
+                    segmenter.resetExportHistory();
+
                     for (long localFrame = 0L; localFrame < segmentFrames; localFrame++) {
                         if (isStopped()) throw new IOException("Montage annulé");
                         long localTimeUs = Math.min(info.durationUs - 1L,
                                 localFrame * 1_000_000L / frameRate);
                         long outputTimeUs = globalFrame * 1_000_000L / frameRate;
-                        Bitmap frame = retriever.getFrameAtTime(Math.max(0L, localTimeUs),
-                                MediaMetadataRetriever.OPTION_CLOSEST);
+                        Bitmap frame = sourceFrames.frameAt(localFrame, localTimeUs);
                         if (frame != null) {
                             encodeOneFrame(frame, outputTimeUs, localTimeUs,
                                     info.rotation, info.width, info.height, mirrorSource,
@@ -149,19 +156,20 @@ public final class ClipTimelineExportWorker extends Worker {
                             globalFrame++;
                         }
                         if (globalFrame % 3L == 0L || localFrame == segmentFrames - 1L) {
-                            int progress = Math.min(96,
-                                    Math.round(globalFrame * 96f / totalFrames));
+                            int progress = Math.min(94,
+                                    3 + Math.round(globalFrame * 91f / totalFrames));
                             setProgressAsync(new Data.Builder()
                                     .putInt(KEY_PROGRESS, progress).build());
                         }
                     }
                 } finally {
-                    try { retriever.release(); } catch (IOException ignored) { }
+                    if (sourceFrames != null) sourceFrames.close();
                     if (background != null) background.close();
                 }
             }
 
             if (globalFrame == 0L) throw new IOException("Aucune image vidéo décodable");
+            setProgressAsync(new Data.Builder().putInt(KEY_PROGRESS, 95).build());
             encoder.finish();
             encoder.close();
             encoder = null;
@@ -217,13 +225,18 @@ public final class ClipTimelineExportWorker extends Worker {
                         MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT, 1280);
                 int rotation = readInt(retriever,
                         MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION, 0);
+                int frameCount = 0;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    frameCount = readInt(retriever,
+                            MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT, 0);
+                }
                 if (rotation == 90 || rotation == 270) {
                     int swap = width;
                     width = height;
                     height = swap;
                 }
                 infos.add(new SourceInfo(segment, Math.max(1L, durationUs),
-                        width, height, rotation));
+                        width, height, rotation, Math.max(0, frameCount)));
             } finally {
                 try { retriever.release(); } catch (IOException ignored) { }
             }
@@ -238,14 +251,104 @@ public final class ClipTimelineExportWorker extends Worker {
         final int width;
         final int height;
         final int rotation;
+        final int frameCount;
 
         SourceInfo(ClipSourceTimeline.Segment segment, long durationUs,
-                   int width, int height, int rotation) {
+                   int width, int height, int rotation, int frameCount) {
             this.segment = segment;
             this.durationUs = durationUs;
             this.width = width;
             this.height = height;
             this.rotation = rotation;
+            this.frameCount = frameCount;
+        }
+    }
+
+    /**
+     * Lecture rapide des prises caméra. Android 9+ sait décoder plusieurs images consécutives
+     * dans une seule opération, bien plus rapide qu'un seek vidéo pour chaque frame.
+     */
+    private static final class SourceFrameProvider implements AutoCloseable {
+        private final SourceInfo info;
+        private final long outputFrameCount;
+        private final MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        private boolean indexedFramesEnabled;
+        private int cachedStart = -1;
+        private final List<Bitmap> cachedFrames = new ArrayList<>();
+
+        SourceFrameProvider(SourceInfo info, long outputFrameCount) throws IOException {
+            this.info = info;
+            this.outputFrameCount = Math.max(1L, outputFrameCount);
+            retriever.setDataSource(info.segment.sourcePath);
+            indexedFramesEnabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                    && info.frameCount > 1;
+        }
+
+        Bitmap frameAt(long outputFrameIndex, long timeUs) {
+            Bitmap indexed = indexedFrame(outputFrameIndex);
+            if (indexed != null) return indexed;
+            return retriever.getFrameAtTime(Math.max(0L, timeUs),
+                    MediaMetadataRetriever.OPTION_CLOSEST);
+        }
+
+        @SuppressLint("NewApi")
+        private Bitmap indexedFrame(long outputFrameIndex) {
+            if (!indexedFramesEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                return null;
+            }
+            int targetIndex;
+            if (outputFrameCount <= 1L || info.frameCount <= 1) {
+                targetIndex = 0;
+            } else {
+                double ratio = outputFrameIndex / (double) (outputFrameCount - 1L);
+                targetIndex = (int) Math.round(ratio * (info.frameCount - 1));
+            }
+            targetIndex = Math.max(0, Math.min(info.frameCount - 1, targetIndex));
+
+            if (cachedStart >= 0 && targetIndex >= cachedStart
+                    && targetIndex < cachedStart + cachedFrames.size()) {
+                int offset = targetIndex - cachedStart;
+                Bitmap frame = cachedFrames.get(offset);
+                if (frame != null && !frame.isRecycled()) {
+                    cachedFrames.set(offset, null);
+                    return frame;
+                }
+            }
+
+            recycleCachedFrames();
+            int count = Math.min(SOURCE_BATCH_SIZE, info.frameCount - targetIndex);
+            try {
+                MediaMetadataRetriever.BitmapParams params =
+                        new MediaMetadataRetriever.BitmapParams();
+                params.setPreferredConfig(Bitmap.Config.ARGB_8888);
+                cachedFrames.addAll(retriever.getFramesAtIndex(targetIndex, count, params));
+                cachedStart = targetIndex;
+                if (cachedFrames.isEmpty()) return null;
+                Bitmap first = cachedFrames.get(0);
+                if (first != null && !first.isRecycled()) {
+                    cachedFrames.set(0, null);
+                    return first;
+                }
+                return null;
+            } catch (Exception ignored) {
+                indexedFramesEnabled = false;
+                recycleCachedFrames();
+                return null;
+            }
+        }
+
+        private void recycleCachedFrames() {
+            for (Bitmap frame : cachedFrames) {
+                if (frame != null && !frame.isRecycled()) frame.recycle();
+            }
+            cachedFrames.clear();
+            cachedStart = -1;
+        }
+
+        @Override
+        public void close() {
+            recycleCachedFrames();
+            try { retriever.release(); } catch (IOException ignored) { }
         }
     }
 

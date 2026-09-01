@@ -2,7 +2,19 @@
 
 Application Android native pour filmer une personne détourée devant un décor image ou vidéo, sans serveur payant.
 
-Version **1.11.0** : moteur ML Kit stable, mode Clip Musique, timeline, menu Réglages et mises à jour intégrées dans l'application.
+Version **1.12.0** : montage timeline accéléré, détourage temporel renforcé et nouvelle identité visuelle.
+
+## Nouveautés v1.12.0
+
+- lecture des prises vidéo par lots sur Android 9+ pour réduire fortement les seeks image par image pendant le montage ;
+- retour automatique à la méthode classique sur les appareils incompatibles ;
+- segmentation d'export en mode vidéo temporel ;
+- réutilisation d'un masque pendant une seule frame lorsque deux images sont réellement quasi identiques ;
+- nouvelle inférence immédiate dès qu'un mouvement important est détecté ;
+- remise à zéro du masque à chaque nouveau plan pour éviter les silhouettes fantômes ;
+- nettoyage spatial des contours : halos réduits, petits trous corrigés, détails fins mieux préservés ;
+- nouveau logo vectoriel Fond Vert Studio ;
+- versionCode 19 / versionName 1.12.0.
 
 ## Fonctions
 
@@ -21,7 +33,7 @@ Version **1.11.0** : moteur ML Kit stable, mode Clip Musique, timeline, menu Ré
 
 ## Réglages et mises à jour intégrées
 
-L'écran d'accueil contient désormais **Réglages · Mises à jour**.
+L'écran d'accueil contient **Réglages · Mises à jour**.
 
 Le menu affiche :
 
@@ -45,7 +57,7 @@ Avant installation, l'application vérifie que l'APK téléchargé :
 
 Une mise à jour Android normale conserve les données privées de l'application. Les exports finaux sont enregistrés dans les collections multimédia publiques `Movies/FondVertStudio` et `Pictures/FondVertStudio`.
 
-> **Migration depuis les anciennes APK debug** : les anciennes builds GitHub Actions n'utilisaient pas une signature de publication stable. Si Android refuse la toute première installation de la v1.11.0 par-dessus une ancienne APK debug, une désinstallation/réinstallation unique peut être nécessaire. Les exports déjà présents dans Movies/Pictures restent indépendants de l'application. À partir de la nouvelle chaîne de publication signée, les mises à jour suivantes utilisent la même signature.
+> **Migration depuis les anciennes APK debug** : les anciennes builds GitHub Actions n'utilisaient pas une signature de publication stable. Si Android refuse la toute première installation de la v1.11.0 ou supérieure par-dessus une ancienne APK debug, une désinstallation/réinstallation unique peut être nécessaire. Les exports déjà présents dans Movies/Pictures restent indépendants de l'application. À partir de la nouvelle chaîne de publication signée, les mises à jour suivantes utilisent la même signature.
 
 ## Technologie
 
@@ -53,6 +65,7 @@ Une mise à jour Android normale conserve les données privées de l'application
 - minSdk 21, targetSdk 34 et compileSdk 34 ;
 - CameraX pour la caméra et l'enregistrement ;
 - ML Kit Selfie Segmentation pour le détourage ;
+- MediaMetadataRetriever avec décodage par lots sur Android 9+ ;
 - MediaCodec et MediaMuxer pour l'encodage vidéo local ;
 - WorkManager pour les exports longs ;
 - GitHub Releases comme source des mises à jour intégrées.
