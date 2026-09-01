@@ -525,13 +525,13 @@
             app:cornerRadius="19dp"
             app:strokeColor="@color/accent" />
 
-        <com.google.android.material.button.MaterialButton
+        <com.chasmet.fondvertstudio.FinalDownloadButton
             android:id="@+id/downloadButton"
             android:layout_width="0dp"
             android:layout_height="64dp"
             android:layout_weight="1"
             android:fontFamily="sans-serif-black"
-            android:text="↓  TÉLÉCHARGER LE CLIP"
+            android:text="↓  TÉLÉCHARGER LA VIDÉO"
             android:textColor="@color/background"
             android:textSize="13sp"
             android:visibility="gone"
