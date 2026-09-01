@@ -2,7 +2,7 @@
 
 Application Android native pour filmer une personne détourée devant un décor image ou vidéo, sans serveur payant.
 
-Version 1.4.1 : calque sujet tactile, contours stabilisés et détourage garanti dans le MP4 final.
+Version **1.11.0** : moteur ML Kit stable, mode Clip Musique, timeline, menu Réglages et mises à jour intégrées dans l'application.
 
 ## Fonctions
 
@@ -12,46 +12,81 @@ Version 1.4.1 : calque sujet tactile, contours stabilisés et détourage garanti
 - sujet déplaçable à un doigt et redimensionnable avec un pincement, même pendant la prise ;
 - trajectoire et zoom tactiles interpolés puis reproduits dans la vidéo finale ;
 - décors sans fond, vert pur, noir, blanc, image ou vidéo ;
-- trois profils de contour : HD net, cheveux et doux, avec stabilisation temporelle adaptative ;
-- gros bouton d’enregistrement avec chronomètre et audio ;
-- export MP4 H.264 jusqu’en 1080p à 30 images/s et haut débit ;
-- bitmap caméra réellement détouré avant composition : le masque reste présent dans la vidéo sauvegardée, même sur les téléphones qui ignorent certains calques graphiques pendant l’export ;
+- profils de contour et stabilisation temporelle du masque ;
+- gros bouton d'enregistrement avec chronomètre et audio ;
+- mode **Clip Musique** avec musique maître, prises successives et timeline ;
+- export MP4 H.264 jusqu'en 1080p ;
 - export PNG réellement transparent ;
-- traitement local : aucun compte, aucune clé API et aucun envoi vers un serveur.
+- traitement local : aucun compte, aucune clé API et aucun envoi du contenu vidéo vers un serveur.
+
+## Réglages et mises à jour intégrées
+
+L'écran d'accueil contient désormais **Réglages · Mises à jour**.
+
+Le menu affiche :
+
+- la version actuellement installée ;
+- la dernière version disponible sur GitHub Releases ;
+- la date de la dernière vérification ;
+- les notes de version ;
+- un contrôle automatique des nouvelles versions ;
+- la progression du téléchargement en pourcentage ;
+- les Mo téléchargés / taille totale ;
+- la vitesse de téléchargement ;
+- la validation de l'APK avant installation ;
+- l'ouverture directe de l'installateur Android.
+
+Avant installation, l'application vérifie que l'APK téléchargé :
+
+1. est un APK Android valide ;
+2. possède le même `applicationId` ;
+3. possède la même signature que l'application installée ;
+4. possède un `versionCode` supérieur.
+
+Une mise à jour Android normale conserve les données privées de l'application. Les exports finaux sont enregistrés dans les collections multimédia publiques `Movies/FondVertStudio` et `Pictures/FondVertStudio`.
+
+> **Migration depuis les anciennes APK debug** : les anciennes builds GitHub Actions n'utilisaient pas une signature de publication stable. Si Android refuse la toute première installation de la v1.11.0 par-dessus une ancienne APK debug, une désinstallation/réinstallation unique peut être nécessaire. Les exports déjà présents dans Movies/Pictures restent indépendants de l'application. À partir de la nouvelle chaîne de publication signée, les mises à jour suivantes utilisent la même signature.
 
 ## Technologie
 
 - Java 17 ;
 - minSdk 21, targetSdk 34 et compileSdk 34 ;
-- CameraX pour la caméra et l’enregistrement ;
-- ML Kit Selfie Segmentation en mode flux non bloquant, avec rendu du masque accéléré par le GPU ;
-- image caméra continue à 30 i/s et masque IA mis à jour séparément, sans figer l'aperçu ;
-- masque stabilisé entre les images : contours calmes à l'arrêt, réponse rapide pendant les mouvements et absence de traîne prolongée ;
-- masque d'export haute définition distinct du masque brut allégé utilisé pour l'aperçu ;
-- décodage séquentiel par lots sur Android 9+ pour accélérer fortement la création vidéo ;
-- masque brut redimensionné en bilinéaire, bords renforcés et détails caméra accentués ;
-- MediaCodec et MediaMuxer pour l’encodage vidéo local ;
-- WorkManager pour les exports longs.
+- CameraX pour la caméra et l'enregistrement ;
+- ML Kit Selfie Segmentation pour le détourage ;
+- MediaCodec et MediaMuxer pour l'encodage vidéo local ;
+- WorkManager pour les exports longs ;
+- GitHub Releases comme source des mises à jour intégrées.
 
-ML Kit nécessite Android 6.0 ou plus récent pour le détourage. L’application reste installable à partir d’Android 5.0 et affiche une information claire sur Android 5.x.
-
-## Fonctionnement
-
-1. Choisir une image ou une vidéo de décor (elle reste intacte).
-2. Se placer devant la caméra : seul le flux caméra est détouré.
-3. Glisser le sujet pour le placer et pincer avec deux doigts pour changer sa taille.
-4. Appuyer sur **ENREGISTRER**, continuer à déplacer ou redimensionner le sujet si nécessaire, puis **ARRÊTER**. Le montage final et tous les mouvements tactiles sont automatiquement ajoutés à la galerie.
+ML Kit nécessite Android 6.0 ou plus récent pour le détourage. L'application reste installable à partir d'Android 5.0 et affiche une information claire sur Android 5.x.
 
 ## Sans fond dans une vidéo
 
 Le format MP4/H.264 Android ne conserve pas de canal alpha. Un projet vidéo choisi comme « transparent » est donc exporté sur un vert pur `#00FF00`, prêt pour la suppression chromatique dans CapCut ou un autre éditeur. Les photos PNG conservent une vraie transparence.
 
-## Compilation
+## Compilation locale
 
 ```bash
 ./gradlew assembleDebug
 ```
 
-L’APK se trouve dans `app/build/outputs/apk/debug/app-debug.apk`.
+APK debug : `app/build/outputs/apk/debug/app-debug.apk`.
 
-Le workflow GitHub Actions **Compiler APK Android** compile également le projet et publie un artefact nommé **Fond-Vert-Studio-APK**.
+Pour contrôler la version distribuée :
+
+```bash
+./gradlew clean assembleDebug assembleRelease lintDebug lintRelease
+```
+
+## GitHub Actions et publication
+
+Le workflow **Compiler APK Android** :
+
+1. compile les APK debug et release ;
+2. exécute Android Lint ;
+3. vérifie que l'ancien moteur expérimental n'est pas réintroduit ;
+4. signe l'APK release avec la clé stable du pipeline ;
+5. vérifie la signature avec `apksigner` ;
+6. publie l'APK installable dans GitHub Actions ;
+7. sur `main`, crée automatiquement la Release `vX.Y.Z` utilisée par l'application pour les mises à jour.
+
+Pour chaque nouvelle version, il faut incrémenter **`versionCode`** et **`versionName`** dans `app/build.gradle`. Le workflow refuse de remplacer silencieusement une clé de signature déjà utilisée pour une Release.

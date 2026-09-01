@@ -1,136 +1,170 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background"
-    android:gravity="center_horizontal"
-    android:orientation="vertical"
-    android:paddingStart="22dp"
-    android:paddingTop="42dp"
-    android:paddingEnd="22dp"
-    android:paddingBottom="28dp">
+    android:fillViewport="true">
 
-    <ImageView
-        android:layout_width="72dp"
-        android:layout_height="72dp"
-        android:contentDescription="@string/app_name"
-        android:src="@drawable/ic_app_mark" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
-        android:fontFamily="sans-serif-black"
-        android:text="FOND VERT STUDIO"
-        android:textColor="@color/ink"
-        android:textSize="27sp" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
-        android:gravity="center"
-        android:text="Choisis ton mode avant de filmer"
-        android:textColor="@color/ink_secondary"
-        android:textSize="14sp" />
-
-    <com.google.android.material.card.MaterialCardView
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="34dp"
-        android:layout_weight="1"
-        app:cardBackgroundColor="@color/surface"
-        app:cardCornerRadius="28dp"
-        app:cardElevation="0dp"
-        app:strokeColor="@color/surface_high"
-        app:strokeWidth="1dp">
+        android:layout_height="wrap_content"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingStart="22dp"
+        android:paddingTop="38dp"
+        android:paddingEnd="22dp"
+        android:paddingBottom="28dp">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
+        <ImageView
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:contentDescription="@string/app_name"
+            android:src="@drawable/ic_app_mark" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:fontFamily="sans-serif-black"
+            android:text="FOND VERT STUDIO"
+            android:textColor="@color/ink"
+            android:textSize="27sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
             android:gravity="center"
-            android:orientation="vertical"
-            android:padding="22dp">
+            android:text="Choisis ton mode avant de filmer"
+            android:textColor="@color/ink_secondary"
+            android:textSize="14sp" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:fontFamily="sans-serif-black"
-                android:text="CAMÉRA CLASSIQUE"
-                android:textColor="@color/ink"
-                android:textSize="20sp" />
+        <TextView
+            android:id="@+id/updateBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_badge"
+            android:fontFamily="sans-serif-black"
+            android:paddingStart="12dp"
+            android:paddingTop="7dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="7dp"
+            android:text="MISE À JOUR DISPONIBLE"
+            android:textColor="@color/accent"
+            android:textSize="11sp"
+            android:visibility="gone" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="7dp"
-                android:gravity="center"
-                android:text="Image, vidéo, fond vert, noir, blanc ou transparent. Micro caméra normal."
-                android:textColor="@color/ink_secondary"
-                android:textSize="13sp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/classicModeButton"
-                android:layout_width="match_parent"
-                android:layout_height="62dp"
-                android:layout_marginTop="22dp"
-                android:fontFamily="sans-serif-black"
-                android:text="OUVRIR CLASSIQUE"
-                android:textColor="@color/background"
-                android:textSize="15sp"
-                app:backgroundTint="@color/accent"
-                app:cornerRadius="20dp" />
-        </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
-
-    <com.google.android.material.card.MaterialCardView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="14dp"
-        android:layout_weight="1"
-        app:cardBackgroundColor="@color/surface"
-        app:cardCornerRadius="28dp"
-        app:cardElevation="0dp"
-        app:strokeColor="@color/accent"
-        app:strokeWidth="2dp">
-
-        <LinearLayout
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:padding="22dp">
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="28dp"
+            app:cardElevation="0dp"
+            app:strokeColor="@color/surface_high"
+            app:strokeWidth="1dp">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:fontFamily="sans-serif-black"
-                android:text="♪ CLIP MUSIQUE"
-                android:textColor="@color/accent"
-                android:textSize="21sp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="7dp"
-                android:gravity="center"
-                android:text="Musique maître · micro coupé · fond vert obligatoire · pause/reprise pour changer de plan."
-                android:textColor="@color/ink_secondary"
-                android:textSize="13sp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/musicModeButton"
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="62dp"
-                android:layout_marginTop="22dp"
-                android:fontFamily="sans-serif-black"
-                android:text="CRÉER UN CLIP"
-                android:textColor="@color/ink"
-                android:textSize="15sp"
-                app:backgroundTint="@color/danger"
-                app:cornerRadius="20dp" />
-        </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="22dp">
 
-</LinearLayout>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-black"
+                    android:text="CAMÉRA CLASSIQUE"
+                    android:textColor="@color/ink"
+                    android:textSize="20sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="7dp"
+                    android:gravity="center"
+                    android:text="Image, vidéo, fond vert, noir, blanc ou transparent. Micro caméra normal."
+                    android:textColor="@color/ink_secondary"
+                    android:textSize="13sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/classicModeButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="62dp"
+                    android:layout_marginTop="22dp"
+                    android:fontFamily="sans-serif-black"
+                    android:text="OUVRIR CLASSIQUE"
+                    android:textColor="@color/background"
+                    android:textSize="15sp"
+                    app:backgroundTint="@color/accent"
+                    app:cornerRadius="20dp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="28dp"
+            app:cardElevation="0dp"
+            app:strokeColor="@color/accent"
+            app:strokeWidth="2dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="22dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-black"
+                    android:text="♪ CLIP MUSIQUE"
+                    android:textColor="@color/accent"
+                    android:textSize="21sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="7dp"
+                    android:gravity="center"
+                    android:text="Musique maître · micro coupé · fond vert obligatoire · pause/reprise pour changer de plan."
+                    android:textColor="@color/ink_secondary"
+                    android:textSize="13sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/musicModeButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="62dp"
+                    android:layout_marginTop="22dp"
+                    android:fontFamily="sans-serif-black"
+                    android:text="CRÉER UN CLIP"
+                    android:textColor="@color/ink"
+                    android:textSize="15sp"
+                    app:backgroundTint="@color/danger"
+                    app:cornerRadius="20dp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/settingsButton"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="18dp"
+            android:fontFamily="sans-serif-black"
+            android:text="⚙ RÉGLAGES · MISES À JOUR"
+            android:textColor="@color/ink"
+            android:textSize="14sp"
+            app:backgroundTint="@color/surface_high"
+            app:cornerRadius="18dp"
+            app:strokeColor="@color/surface_high"
+            app:strokeWidth="1dp" />
+
+    </LinearLayout>
+</ScrollView>
