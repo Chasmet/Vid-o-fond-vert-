@@ -9,6 +9,8 @@ import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 
 import androidx.core.content.FileProvider;
@@ -35,6 +37,7 @@ public final class AppUpdateManager {
             "https://api.github.com/repos/Chasmet/Vid-o-fond-vert-/releases/latest";
     private static final String USER_AGENT = "FondVertStudio-Android-Updater";
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     private AppUpdateManager() {
     }
@@ -117,10 +120,10 @@ public final class AppUpdateManager {
                 boolean newer = compareVersions(version, currentVersion) > 0;
                 UpdateInfo info = new UpdateInfo(version, title, notes, publishedAt,
                         apkUrl, apkSize, newer);
-                appContext.getMainExecutor().execute(() -> callback.onSuccess(info));
+                MAIN.post(() -> callback.onSuccess(info));
             } catch (Exception error) {
                 String message = cleanError(error, "Impossible de vérifier les mises à jour.");
-                appContext.getMainExecutor().execute(() -> callback.onError(message));
+                MAIN.post(() -> callback.onError(message));
             } finally {
                 if (connection != null) {
                     connection.disconnect();
@@ -159,7 +162,7 @@ public final class AppUpdateManager {
                         ? connection.getContentLengthLong() : connection.getContentLength();
                 long totalBytes = contentLength > 0 ? contentLength : info.assetSize;
                 long finalTotalBytes = totalBytes;
-                appContext.getMainExecutor().execute(() -> callback.onStarted(finalTotalBytes));
+                MAIN.post(() -> callback.onStarted(finalTotalBytes));
 
                 long downloaded = 0L;
                 long startedAt = System.currentTimeMillis();
@@ -180,7 +183,7 @@ public final class AppUpdateManager {
                             long elapsedMs = Math.max(1L, now - startedAt);
                             long speed = (downloaded * 1000L) / elapsedMs;
                             long progressDownloaded = downloaded;
-                            appContext.getMainExecutor().execute(() -> callback.onProgress(
+                            MAIN.post(() -> callback.onProgress(
                                     percent, progressDownloaded, finalTotalBytes, speed));
                         }
                     }
@@ -188,10 +191,10 @@ public final class AppUpdateManager {
                 }
 
                 validateDownloadedApk(appContext, apkFile);
-                appContext.getMainExecutor().execute(() -> callback.onReady(apkFile));
+                MAIN.post(() -> callback.onReady(apkFile));
             } catch (Exception error) {
                 String message = cleanError(error, "Échec du téléchargement de la mise à jour.");
-                appContext.getMainExecutor().execute(() -> callback.onError(message));
+                MAIN.post(() -> callback.onError(message));
             } finally {
                 if (connection != null) {
                     connection.disconnect();
