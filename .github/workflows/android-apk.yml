@@ -6,6 +6,8 @@ on:
   pull_request:
     branches: ["main"]
   workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1,4"
 
 permissions:
   contents: write
@@ -17,7 +19,31 @@ env:
   ANDROID_KEY_PASSWORD: android
 
 jobs:
+  keep-signing-key:
+    if: github.event_name == 'schedule'
+    name: Conserver la signature Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Restaurer la clé de signature stable
+        id: signing-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/fondvert-update.keystore
+          key: fond-vert-studio-signing-v1
+
+      - name: Vérifier que la clé existe toujours
+        shell: bash
+        run: |
+          if [ ! -f "$ANDROID_KEYSTORE_PATH" ]; then
+            echo "ERREUR : la clé de signature stable n'est plus disponible."
+            echo "Aucune nouvelle clé ne sera générée afin de ne pas casser les mises à jour Android."
+            exit 1
+          fi
+          echo "Clé de signature restaurée : continuité des mises à jour préservée."
+
   build:
+    if: github.event_name != 'schedule'
     name: Fond Vert Studio APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -39,26 +65,39 @@ jobs:
         run: chmod +x gradlew
 
       - name: Restaurer la clé de signature stable
+        id: signing-cache
         uses: actions/cache@v4
         with:
           path: ~/.android/fondvert-update.keystore
           key: fond-vert-studio-signing-v1
 
-      - name: Créer la clé de signature au premier lancement
+      - name: Préparer la signature sans jamais la remplacer
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           mkdir -p ~/.android
-          if [ ! -f "$ANDROID_KEYSTORE_PATH" ]; then
-            keytool -genkeypair -v \
-              -keystore "$ANDROID_KEYSTORE_PATH" \
-              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-              -alias "$ANDROID_KEY_ALIAS" \
-              -keypass "$ANDROID_KEY_PASSWORD" \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Fond Vert Studio Update,O=Chasmet,C=FR"
+          if [ -f "$ANDROID_KEYSTORE_PATH" ]; then
+            echo "Clé de signature stable restaurée."
+            exit 0
           fi
+
+          if [ "$GITHUB_REF" = "refs/heads/main" ] && gh release list --limit 1 | grep -q .; then
+            echo "ERREUR : une Release existe déjà mais la clé de signature historique est absente."
+            echo "Le workflow refuse de générer une nouvelle clé car Android rejetterait les mises à jour."
+            exit 1
+          fi
+
+          keytool -genkeypair -v \
+            -keystore "$ANDROID_KEYSTORE_PATH" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" \
+            -keypass "$ANDROID_KEY_PASSWORD" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Fond Vert Studio Update,O=Chasmet,C=FR"
+          echo "Première clé stable créée. Elle sera réutilisée pour toutes les prochaines Releases."
 
       - name: Vérifier le moteur stable
         run: |
@@ -103,17 +142,15 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           cp app/build/outputs/apk/release/app-release.apk "Fond-Vert-Studio-v${VERSION}.apk"
-          cp app/build/outputs/apk/debug/app-debug.apk "Fond-Vert-Studio-v${VERSION}-debug.apk"
           sha256sum "Fond-Vert-Studio-v${VERSION}.apk" > "Fond-Vert-Studio-v${VERSION}.apk.sha256"
 
-      - name: Publier les APK dans Actions
+      - name: Publier l'APK installable dans Actions
         uses: actions/upload-artifact@v4
         with:
           name: Fond-Vert-Studio-v${{ steps.version.outputs.version }}
           path: |
             Fond-Vert-Studio-v${{ steps.version.outputs.version }}.apk
             Fond-Vert-Studio-v${{ steps.version.outputs.version }}.apk.sha256
-            Fond-Vert-Studio-v${{ steps.version.outputs.version }}-debug.apk
           if-no-files-found: error
           retention-days: 30
 
