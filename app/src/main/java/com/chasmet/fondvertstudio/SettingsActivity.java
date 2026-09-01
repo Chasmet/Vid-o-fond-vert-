@@ -13,6 +13,7 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 
 import java.io.File;
+import java.util.Date;
 import java.util.Locale;
 
 public final class SettingsActivity extends AppCompatActivity {
@@ -81,8 +82,13 @@ public final class SettingsActivity extends AppCompatActivity {
         super.onResume();
         if (waitingForInstallPermission && pendingApk != null) {
             waitingForInstallPermission = false;
-            updateStatusText.setText("Autorisation accordée. Ouverture de l'installation…");
-            AppUpdateManager.installDownloadedApk(this, pendingApk);
+            updateStatusText.setText("Vérification de l'autorisation d'installation…");
+            boolean installationOpened = AppUpdateManager.installDownloadedApk(this, pendingApk);
+            if (!installationOpened) {
+                waitingForInstallPermission = true;
+                updateStatusText.setText(
+                        "L'autorisation d'installation est nécessaire pour appliquer la mise à jour.");
+            }
         }
     }
 
@@ -230,7 +236,7 @@ public final class SettingsActivity extends AppCompatActivity {
         }
         java.text.DateFormat formatter = java.text.DateFormat.getDateTimeInstance(
                 java.text.DateFormat.SHORT, java.text.DateFormat.SHORT, Locale.getDefault());
-        lastCheckText.setText("Dernière vérification : " + formatter.format(timestamp));
+        lastCheckText.setText("Dernière vérification : " + formatter.format(new Date(timestamp)));
     }
 
     private static String formatBytes(long bytes) {
