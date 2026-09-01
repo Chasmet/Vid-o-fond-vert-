@@ -10,8 +10,8 @@ android {
         applicationId 'com.chasmet.fondvertstudio'
         minSdk 21
         targetSdk 34
-        versionCode 20
-        versionName '1.12.1'
+        versionCode 21
+        versionName '1.12.2'
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         vectorDrawables.useSupportLibrary = true
@@ -67,4 +67,7 @@ dependencies {
     // Pipeline volontairement simple et stable pour le direct : une seule segmentation ML Kit.
     implementation 'com.google.mlkit:segmentation-selfie:16.0.0-beta6'
     implementation 'androidx.work:work-runtime:2.9.1'
+
+    // Conversion locale WAV/PCM -> AAC pour garantir un MP4 final compatible MediaMuxer.
+    implementation 'androidx.media3:media3-transformer:1.4.1'
 }

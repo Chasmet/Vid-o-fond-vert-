@@ -7,13 +7,19 @@ import android.media.MediaFormat;
 import android.media.MediaMuxer;
 import android.net.Uri;
 
+import androidx.annotation.OptIn;
+import androidx.media3.common.util.UnstableApi;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+@OptIn(markerClass = UnstableApi.class)
 final class MuxerUtils {
+    private static final String MIME_AAC = "audio/mp4a-latm";
+
     private MuxerUtils() {
     }
 
@@ -22,11 +28,71 @@ final class MuxerUtils {
         addAudio(context, videoOnly, sourceUri, output, durationUs, 0L);
     }
 
-    static void addAudio(Context context, File videoOnly, Uri audioUri,
-                         File output, long durationUs, long audioStartUs) throws IOException {
+    static boolean addAudio(Context context, File videoOnly, Uri audioUri,
+                            File output, long durationUs, long audioStartUs) throws IOException {
+        File convertedAudio = null;
+        try {
+            String sourceAudioMime = inspectAudioMime(context, audioUri);
+            if (sourceAudioMime == null) {
+                copyFile(videoOnly, output);
+                return false;
+            }
+
+            Uri muxAudioUri = audioUri;
+            long muxStartUs = Math.max(0L, audioStartUs);
+
+            // MediaMuxer MP4 refuse notamment les pistes WAV/PCM. On les convertit
+            // localement en AAC avant l'assemblage final.
+            if (!MIME_AAC.equalsIgnoreCase(sourceAudioMime)) {
+                convertedAudio = createTemporaryAacFile(context);
+                AudioCompatibilityTranscoder.transcodeToAac(
+                        context, audioUri, convertedAudio, muxStartUs, durationUs);
+                muxAudioUri = Uri.fromFile(convertedAudio);
+                muxStartUs = 0L;
+            }
+
+            try {
+                muxTracks(context, videoOnly, muxAudioUri, output, durationUs, muxStartUs);
+            } catch (IllegalArgumentException | IllegalStateException directMuxError) {
+                if (convertedAudio == null) {
+                    if (output.exists()) output.delete();
+                    convertedAudio = createTemporaryAacFile(context);
+                    AudioCompatibilityTranscoder.transcodeToAac(
+                            context, audioUri, convertedAudio,
+                            Math.max(0L, audioStartUs), durationUs);
+                    muxTracks(context, videoOnly, Uri.fromFile(convertedAudio),
+                            output, durationUs, 0L);
+                } else {
+                    throw directMuxError;
+                }
+            }
+            return true;
+        } catch (Exception audioError) {
+            // Ne jamais faire perdre un montage terminé à cause de la piste audio.
+            // Si la conversion échoue malgré tout sur un appareil particulier, on rend
+            // la vidéo sans musique : l'écran de téléchargement reste donc disponible.
+            if (output.exists()) output.delete();
+            try {
+                copyFile(videoOnly, output);
+                return false;
+            } catch (IOException fallbackError) {
+                fallbackError.addSuppressed(audioError);
+                throw fallbackError;
+            }
+        } finally {
+            if (convertedAudio != null && convertedAudio.exists()) {
+                convertedAudio.delete();
+            }
+        }
+    }
+
+    private static void muxTracks(Context context, File videoOnly, Uri audioUri,
+                                  File output, long durationUs, long audioStartUs)
+            throws IOException {
         MediaExtractor videoExtractor = new MediaExtractor();
         MediaExtractor audioExtractor = new MediaExtractor();
         MediaMuxer muxer = null;
+        boolean muxerStarted = false;
         try {
             videoExtractor.setDataSource(videoOnly.getAbsolutePath());
             setDataSource(audioExtractor, context, audioUri);
@@ -40,11 +106,15 @@ final class MuxerUtils {
                 return;
             }
 
+            if (output.exists() && !output.delete()) {
+                throw new IOException("Impossible de remplacer le montage temporaire");
+            }
             muxer = new MediaMuxer(output.getAbsolutePath(),
                     MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
             int outputVideoTrack = muxer.addTrack(videoExtractor.getTrackFormat(videoTrack));
             int outputAudioTrack = muxer.addTrack(audioExtractor.getTrackFormat(audioTrack));
             muxer.start();
+            muxerStarted = true;
             copyTrack(videoExtractor, videoTrack, muxer, outputVideoTrack, durationUs,
                     0L, false);
             copyTrack(audioExtractor, audioTrack, muxer, outputAudioTrack, durationUs,
@@ -53,12 +123,34 @@ final class MuxerUtils {
             videoExtractor.release();
             audioExtractor.release();
             if (muxer != null) {
-                try {
-                    muxer.stop();
-                } catch (Exception ignored) {
+                if (muxerStarted) {
+                    try {
+                        muxer.stop();
+                    } catch (Exception ignored) {
+                    }
                 }
                 muxer.release();
             }
+        }
+    }
+
+    private static File createTemporaryAacFile(Context context) throws IOException {
+        File directory = new File(context.getCacheDir(), "audio_transcodes");
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw new IOException("Dossier audio temporaire inaccessible");
+        }
+        return new File(directory, "audio_aac_" + System.nanoTime() + ".m4a");
+    }
+
+    private static String inspectAudioMime(Context context, Uri uri) throws IOException {
+        MediaExtractor extractor = new MediaExtractor();
+        try {
+            setDataSource(extractor, context, uri);
+            int audioTrack = findTrack(extractor, "audio/");
+            if (audioTrack < 0) return null;
+            return extractor.getTrackFormat(audioTrack).getString(MediaFormat.KEY_MIME);
+        } finally {
+            extractor.release();
         }
     }
 
