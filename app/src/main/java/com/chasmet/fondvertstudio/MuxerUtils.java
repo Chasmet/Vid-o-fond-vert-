@@ -24,21 +24,21 @@ final class MuxerUtils {
         addAudio(context, videoOnly, sourceUri, output, durationUs, 0L);
     }
 
-    static void addAudio(Context context, File videoOnly, Uri audioUri,
-                         File output, long durationUs, long audioStartUs) throws IOException {
-        String sourceAudioMime = inspectAudioMime(context, audioUri);
-        if (sourceAudioMime == null) {
-            copyFile(videoOnly, output);
-            return;
-        }
-
+    static boolean addAudio(Context context, File videoOnly, Uri audioUri,
+                            File output, long durationUs, long audioStartUs) throws IOException {
         File convertedAudio = null;
-        Uri muxAudioUri = audioUri;
-        long muxStartUs = Math.max(0L, audioStartUs);
         try {
-            // Android MediaMuxer ne peut pas ajouter une piste WAV/PCM dans un MP4.
-            // On convertit uniquement les formats non AAC afin de ne pas ralentir les MP3/AAC
-            // déjà compatibles inutilement.
+            String sourceAudioMime = inspectAudioMime(context, audioUri);
+            if (sourceAudioMime == null) {
+                copyFile(videoOnly, output);
+                return false;
+            }
+
+            Uri muxAudioUri = audioUri;
+            long muxStartUs = Math.max(0L, audioStartUs);
+
+            // MediaMuxer MP4 refuse notamment les pistes WAV/PCM. On les convertit
+            // localement en AAC avant l'assemblage final.
             if (!MIME_AAC.equalsIgnoreCase(sourceAudioMime)) {
                 convertedAudio = createTemporaryAacFile(context);
                 AudioCompatibilityTranscoder.transcodeToAac(
@@ -50,8 +50,6 @@ final class MuxerUtils {
             try {
                 muxTracks(context, videoOnly, muxAudioUri, output, durationUs, muxStartUs);
             } catch (IllegalArgumentException | IllegalStateException directMuxError) {
-                // Certains téléphones refusent malgré tout une piste annoncée AAC avec des
-                // paramètres de conteneur inhabituels. Une conversion propre élimine ces clés.
                 if (convertedAudio == null) {
                     if (output.exists()) output.delete();
                     convertedAudio = createTemporaryAacFile(context);
@@ -61,8 +59,21 @@ final class MuxerUtils {
                     muxTracks(context, videoOnly, Uri.fromFile(convertedAudio),
                             output, durationUs, 0L);
                 } else {
-                    throw new IOException("Assemblage audio/vidéo impossible", directMuxError);
+                    throw directMuxError;
                 }
+            }
+            return true;
+        } catch (Exception audioError) {
+            // Ne jamais faire perdre un montage terminé à cause de la piste audio.
+            // Si la conversion échoue malgré tout sur un appareil particulier, on rend
+            // la vidéo sans musique : l'écran de téléchargement reste donc disponible.
+            if (output.exists()) output.delete();
+            try {
+                copyFile(videoOnly, output);
+                return false;
+            } catch (IOException fallbackError) {
+                fallbackError.addSuppressed(audioError);
+                throw fallbackError;
             }
         } finally {
             if (convertedAudio != null && convertedAudio.exists()) {
