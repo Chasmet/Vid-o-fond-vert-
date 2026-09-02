@@ -70,7 +70,7 @@
             android:screenOrientation="portrait" />
 
         <activity
-            android:name=".ClipTimelineFastActivity"
+            android:name=".ClipTimelineInstantActivity"
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:exported="false"
             android:screenOrientation="portrait" />
