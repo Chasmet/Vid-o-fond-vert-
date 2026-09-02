@@ -42,7 +42,11 @@ final class H264FrameEncoder implements AutoCloseable {
         MediaFormat format = MediaFormat.createVideoFormat(MIME, width, height);
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible);
-        int bitrate = Math.max(4_000_000, Math.min(22_000_000, width * height * 9));
+
+        // L'ancien minimum de 4 Mb/s était trop faible en 1080x1920 pour des contours détourés.
+        // On privilégie la qualité du montage final : ~10-24 Mb/s selon la définition.
+        int bitrate = Math.max(10_000_000,
+                Math.min(24_000_000, width * height * 12));
         format.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
         format.setInteger(MediaFormat.KEY_FRAME_RATE, frameRate);
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
