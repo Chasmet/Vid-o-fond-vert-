@@ -11,6 +11,8 @@ import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
@@ -24,6 +26,29 @@ final class MuxerUtils {
     static void addSourceAudio(Context context, File videoOnly, Uri sourceUri,
                                File output, long durationUs) throws IOException {
         addAudio(context, videoOnly, sourceUri, output, durationUs, 0L);
+    }
+
+    /** Retourne vrai si la source peut être muxée directement comme AAC. */
+    static boolean isAacAudio(Context context, Uri audioUri) throws IOException {
+        if (audioUri == null) return false;
+        return MIME_AAC.equalsIgnoreCase(inspectAudioMime(context, audioUri));
+    }
+
+    /**
+     * Prépare à l'avance une musique non AAC. L'étape finale du clip n'a ainsi plus
+     * à attendre une conversion WAV/PCM de plusieurs minutes.
+     */
+    static Uri prepareAudioForFastMux(Context context, Uri sourceUri,
+                                      File destination, long fullDurationUs)
+            throws IOException {
+        if (sourceUri == null) throw new IOException("Musique absente");
+        String mime = inspectAudioMime(context, sourceUri);
+        if (mime == null) throw new IOException("Aucune piste audio lisible");
+        if (MIME_AAC.equalsIgnoreCase(mime)) return sourceUri;
+        if (destination == null) throw new IOException("Fichier audio temporaire absent");
+        AudioCompatibilityTranscoder.transcodeToAac(
+                context, sourceUri, destination, 0L, Math.max(1L, fullDurationUs));
+        return Uri.fromFile(destination);
     }
 
     static boolean addAudio(Context context, File videoOnly, Uri audioUri,
@@ -42,8 +67,6 @@ final class MuxerUtils {
             Uri muxAudioUri = audioUri;
             long muxStartUs = Math.max(0L, audioStartUs);
 
-            // MP4/MediaMuxer n'accepte pas tous les formats (notamment WAV/PCM).
-            // On normalise systématiquement les formats non AAC vers AAC/M4A.
             if (!MIME_AAC.equalsIgnoreCase(sourceAudioMime)) {
                 convertedAudio = createTemporaryAacFile(context);
                 AudioCompatibilityTranscoder.transcodeToAac(
@@ -55,8 +78,6 @@ final class MuxerUtils {
             try {
                 muxTracks(context, videoOnly, muxAudioUri, output, durationUs, muxStartUs);
             } catch (IllegalArgumentException | IllegalStateException directMuxError) {
-                // Même une piste AAC peut être empaquetée de manière incompatible selon sa source.
-                // Dans ce cas on la retranscode une fois proprement avant un second muxage.
                 if (convertedAudio == null) {
                     if (output.exists()) output.delete();
                     convertedAudio = createTemporaryAacFile(context);
@@ -70,7 +91,6 @@ final class MuxerUtils {
                 }
             }
 
-            // Contrôle final obligatoire : on ne considère plus une vidéo silencieuse comme réussie.
             if (!hasAudioTrack(output)) {
                 if (output.exists()) output.delete();
                 throw new IOException("La piste audio n'a pas été intégrée au montage final");
@@ -86,8 +106,47 @@ final class MuxerUtils {
                     ? "Échec de l'intégration de la musique"
                     : "Échec de l'intégration de la musique : " + message, error);
         } finally {
-            if (convertedAudio != null && convertedAudio.exists()) {
-                convertedAudio.delete();
+            if (convertedAudio != null && convertedAudio.exists()) convertedAudio.delete();
+        }
+    }
+
+    static boolean hasAudioTrack(File file) throws IOException {
+        if (file == null || !file.isFile() || file.length() <= 0L) return false;
+        MediaExtractor extractor = new MediaExtractor();
+        try {
+            extractor.setDataSource(file.getAbsolutePath());
+            return findTrack(extractor, "audio/") >= 0;
+        } finally {
+            extractor.release();
+        }
+    }
+
+    static boolean hasVideoTrack(File file) throws IOException {
+        if (file == null || !file.isFile() || file.length() <= 0L) return false;
+        MediaExtractor extractor = new MediaExtractor();
+        try {
+            extractor.setDataSource(file.getAbsolutePath());
+            return findTrack(extractor, "video/") >= 0;
+        } finally {
+            extractor.release();
+        }
+    }
+
+    /** Copie brute utilisée comme dernier filet de sécurité : une vidéo n'est jamais perdue. */
+    static void copyVideoOnly(File source, File output) throws IOException {
+        if (source == null || !source.isFile() || source.length() <= 0L) {
+            throw new IOException("Vidéo source absente");
+        }
+        File parent = output.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            throw new IOException("Dossier vidéo inaccessible");
+        }
+        try (FileInputStream input = new FileInputStream(source);
+             FileOutputStream destination = new FileOutputStream(output)) {
+            byte[] buffer = new byte[256 * 1024];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                destination.write(buffer, 0, count);
             }
         }
     }
@@ -104,12 +163,8 @@ final class MuxerUtils {
             setDataSource(audioExtractor, context, audioUri);
             int videoTrack = findTrack(videoExtractor, "video/");
             int audioTrack = findTrack(audioExtractor, "audio/");
-            if (videoTrack < 0) {
-                throw new IOException("Piste vidéo absente");
-            }
-            if (audioTrack < 0) {
-                throw new IOException("Piste audio absente après préparation");
-            }
+            if (videoTrack < 0) throw new IOException("Piste vidéo absente");
+            if (audioTrack < 0) throw new IOException("Piste audio absente après préparation");
 
             if (output.exists() && !output.delete()) {
                 throw new IOException("Impossible de remplacer le montage temporaire");
@@ -129,10 +184,7 @@ final class MuxerUtils {
             audioExtractor.release();
             if (muxer != null) {
                 if (muxerStarted) {
-                    try {
-                        muxer.stop();
-                    } catch (Exception ignored) {
-                    }
+                    try { muxer.stop(); } catch (Exception ignored) { }
                 }
                 muxer.release();
             }
@@ -154,17 +206,6 @@ final class MuxerUtils {
             int audioTrack = findTrack(extractor, "audio/");
             if (audioTrack < 0) return null;
             return extractor.getTrackFormat(audioTrack).getString(MediaFormat.KEY_MIME);
-        } finally {
-            extractor.release();
-        }
-    }
-
-    private static boolean hasAudioTrack(File file) throws IOException {
-        if (file == null || !file.isFile() || file.length() <= 0L) return false;
-        MediaExtractor extractor = new MediaExtractor();
-        try {
-            extractor.setDataSource(file.getAbsolutePath());
-            return findTrack(extractor, "audio/") >= 0;
         } finally {
             extractor.release();
         }
@@ -198,9 +239,7 @@ final class MuxerUtils {
                 if (!extractor.advance()) break;
                 continue;
             }
-            if (firstTimeUs < 0L) {
-                firstTimeUs = seekToStart ? startUs : sampleTime;
-            }
+            if (firstTimeUs < 0L) firstTimeUs = seekToStart ? startUs : sampleTime;
             long normalizedTime = Math.max(0L, sampleTime - firstTimeUs);
             if (normalizedTime > durationUs) break;
             int codecFlags = (extractor.getSampleFlags() & MediaExtractor.SAMPLE_FLAG_SYNC) != 0
