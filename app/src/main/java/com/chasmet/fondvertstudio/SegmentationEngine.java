@@ -2,7 +2,6 @@ package com.chasmet.fondvertstudio;
 
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.Color;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -56,16 +55,15 @@ public final class SegmentationEngine implements AutoCloseable {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean streamBusy = new AtomicBoolean(false);
 
-    private static final int INFERENCE_MAX_DIMENSION = 512;
-    private static final int EXPORT_INFERENCE_MAX_DIMENSION = 576;
+    // Plus de définition qu'avant : le masque 512/576 créait des contours mous et grossiers.
+    private static final int INFERENCE_MAX_DIMENSION = 640;
+    private static final int EXPORT_INFERENCE_MAX_DIMENSION = 768;
     private static final int STABILIZATION_NONE = 0;
     private static final int STABILIZATION_STREAM = 1;
     private static final int STABILIZATION_EXPORT = 2;
-    private static final int EXPORT_SAMPLE_GRID = 12;
-    private static final float EXPORT_REUSE_MAX_LUMA_DELTA = 0.040f;
 
-    private volatile float threshold = 0.50f;
-    private volatile float softness = 0.065f;
+    private volatile float threshold = 0.54f;
+    private volatile float softness = 0.045f;
 
     private float[] previousStreamMask;
     private int previousStreamWidth;
@@ -74,8 +72,6 @@ public final class SegmentationEngine implements AutoCloseable {
     private float[] previousExportMask;
     private int previousExportWidth;
     private int previousExportHeight;
-    private float[] exportReferenceLuma;
-    private int exportFramesSinceInference;
 
     public SegmentationEngine(Context context) {
         SelfieSegmenterOptions streamOptions = new SelfieSegmenterOptions.Builder()
@@ -87,6 +83,7 @@ public final class SegmentationEngine implements AutoCloseable {
                 .build();
         SelfieSegmenterOptions exportOptions = new SelfieSegmenterOptions.Builder()
                 .setDetectorMode(SelfieSegmenterOptions.STREAM_MODE)
+                .enableRawSizeMask()
                 .build();
         streamSegmenter = Segmentation.getClient(streamOptions);
         stillSegmenter = Segmentation.getClient(stillOptions);
@@ -94,8 +91,8 @@ public final class SegmentationEngine implements AutoCloseable {
     }
 
     public void setEdgeSettings(float newThreshold, float newSoftness) {
-        threshold = newThreshold;
-        softness = newSoftness;
+        threshold = clamp(newThreshold);
+        softness = Math.max(0.02f, Math.min(0.09f, newSoftness));
     }
 
     public boolean isStreamBusy() {
@@ -112,8 +109,6 @@ public final class SegmentationEngine implements AutoCloseable {
         previousExportMask = null;
         previousExportWidth = 0;
         previousExportHeight = 0;
-        exportReferenceLuma = null;
-        exportFramesSinceInference = 0;
     }
 
     public void processStream(Bitmap bitmap, @NonNull Callback callback) {
@@ -161,7 +156,7 @@ public final class SegmentationEngine implements AutoCloseable {
         resultExecutor.execute(() -> {
             Bitmap inferenceBitmap = null;
             try {
-                inferenceBitmap = BitmapUtils.scaleDown(bitmap, INFERENCE_MAX_DIMENSION);
+                inferenceBitmap = BitmapUtils.scaleDown(bitmap, EXPORT_INFERENCE_MAX_DIMENSION);
                 SegmentationMask mask = Tasks.await(
                         stillSegmenter.process(InputImage.fromBitmap(inferenceBitmap, 0)),
                         60, TimeUnit.SECONDS);
@@ -181,52 +176,22 @@ public final class SegmentationEngine implements AutoCloseable {
     }
 
     /**
-     * Export vidéo optimisé : le segmenter STREAM conserve mieux les contours d'une image
-     * à l'autre. Sur une image quasi identique à la précédente, un seul masque peut être
-     * réutilisé pendant une frame maximum. Les mouvements rapides relancent immédiatement
-     * l'inférence, ce qui évite la traîne tout en réduisant nettement le coût des plans fixes.
+     * Export qualité : chaque image est réellement ré-analysée. L'ancienne optimisation
+     * réutilisait parfois le masque précédent et créait traînées, épaules fantômes et contours
+     * rectangulaires. Pour un montage final, la qualité prime sur quelques secondes de calcul.
      */
     public Result processStillBlocking(Bitmap bitmap, float localThreshold,
                                        float localSoftness) throws Exception {
-        float[] lumaSample = sampleLuma(bitmap, EXPORT_SAMPLE_GRID);
-        float[] reusableMask = null;
-        int reusableWidth = 0;
-        int reusableHeight = 0;
-
-        synchronized (this) {
-            if (previousExportMask != null
-                    && exportReferenceLuma != null
-                    && exportFramesSinceInference < 1
-                    && meanAbsoluteDifference(exportReferenceLuma, lumaSample)
-                    <= EXPORT_REUSE_MAX_LUMA_DELTA) {
-                reusableMask = previousExportMask;
-                reusableWidth = previousExportWidth;
-                reusableHeight = previousExportHeight;
-                exportFramesSinceInference++;
-            }
-        }
-
-        if (reusableMask != null && reusableWidth > 0 && reusableHeight > 0) {
-            Bitmap alphaMask = BitmapUtils.createAlphaMask(
-                    reusableMask, reusableWidth, reusableHeight,
-                    localThreshold, localSoftness);
-            return new Result(bitmap, null, alphaMask, reusableMask,
-                    reusableWidth, reusableHeight);
-        }
-
         Bitmap inferenceBitmap = BitmapUtils.scaleDown(
                 bitmap, EXPORT_INFERENCE_MAX_DIMENSION);
         try {
             SegmentationMask mask = Tasks.await(
                     exportSegmenter.process(InputImage.fromBitmap(inferenceBitmap, 0)),
                     60, TimeUnit.SECONDS);
-            Result result = makeResult(bitmap, mask, localThreshold, localSoftness,
+            return makeResult(bitmap, mask,
+                    Math.max(0.52f, localThreshold),
+                    Math.min(0.055f, Math.max(0.025f, localSoftness)),
                     false, STABILIZATION_EXPORT);
-            synchronized (this) {
-                exportReferenceLuma = lumaSample;
-                exportFramesSinceInference = 0;
-            }
-            return result;
         } finally {
             if (inferenceBitmap != bitmap && !inferenceBitmap.isRecycled()) {
                 inferenceBitmap.recycle();
@@ -244,10 +209,13 @@ public final class SegmentationEngine implements AutoCloseable {
         FloatBuffer buffer = byteBuffer.order(ByteOrder.nativeOrder()).asFloatBuffer();
         float[] mask = new float[maskWidth * maskHeight];
         buffer.get(mask);
+
         if (stabilizationMode != STABILIZATION_NONE) {
             mask = stabilizeMask(mask, maskWidth, maskHeight, stabilizationMode);
         }
         mask = refineConfidenceMask(mask, maskWidth, maskHeight,
+                stabilizationMode == STABILIZATION_EXPORT);
+        mask = featherFrameBorders(mask, maskWidth, maskHeight,
                 stabilizationMode == STABILIZATION_EXPORT);
 
         Bitmap cutout = createCutout
@@ -260,8 +228,8 @@ public final class SegmentationEngine implements AutoCloseable {
     }
 
     /**
-     * Stabilisation temporelle avec détection de changement de plan. Un cut franc remet
-     * immédiatement l'historique à zéro au lieu de mélanger deux silhouettes différentes.
+     * Stabilisation temporelle légère. On garde seulement un peu de mémoire dans les zones
+     * réellement stables. Les mouvements de bras, tête et cheveux doivent suivre l'image actuelle.
      */
     private synchronized float[] stabilizeMask(float[] current, int width, int height,
                                                int mode) {
@@ -280,11 +248,11 @@ public final class SegmentationEngine implements AutoCloseable {
             for (int index = 0; index < current.length; index++) {
                 float difference = Math.abs(current[index] - previous[index]);
                 differenceSum += difference;
-                if (difference > 0.34f) hardChanges++;
+                if (difference > 0.30f) hardChanges++;
             }
             float averageDifference = (float) (differenceSum / current.length);
-            boolean sceneCut = averageDifference > 0.19f
-                    || hardChanges > current.length * 0.22f;
+            boolean sceneCut = averageDifference > 0.15f
+                    || hardChanges > current.length * 0.18f;
 
             if (sceneCut) {
                 System.arraycopy(current, 0, stable, 0, current.length);
@@ -294,29 +262,20 @@ public final class SegmentationEngine implements AutoCloseable {
                     float history = previous[index];
                     float difference = Math.abs(value - history);
                     float historyWeight;
-                    if (difference < 0.035f) {
-                        historyWeight = export ? 0.40f : 0.36f;
-                    } else if (difference < 0.08f) {
-                        historyWeight = export ? 0.30f : 0.27f;
-                    } else if (difference < 0.16f) {
-                        historyWeight = export ? 0.16f : 0.14f;
-                    } else if (difference < 0.28f) {
-                        historyWeight = 0.045f;
+                    if (difference < 0.025f) {
+                        historyWeight = export ? 0.20f : 0.25f;
+                    } else if (difference < 0.07f) {
+                        historyWeight = export ? 0.12f : 0.18f;
+                    } else if (difference < 0.14f) {
+                        historyWeight = export ? 0.055f : 0.09f;
                     } else {
-                        historyWeight = 0.006f;
+                        historyWeight = 0.008f;
                     }
-                    // Le fond doit réapparaître vite derrière un bras, une main ou des cheveux.
-                    if (value < history && difference > 0.07f) {
-                        historyWeight *= 0.46f;
+                    if (value < history && difference > 0.05f) {
+                        historyWeight *= 0.30f;
                     }
-                    float blended = value * (1f - historyWeight)
-                            + history * historyWeight;
-                    if (difference > 0.12f) {
-                        float motion = Math.min(1f, (difference - 0.12f) / 0.40f);
-                        blended = clamp(0.5f + (blended - 0.5f)
-                                * (1f + 0.12f * motion));
-                    }
-                    stable[index] = clamp(blended);
+                    stable[index] = clamp(value * (1f - historyWeight)
+                            + history * historyWeight);
                 }
             }
         }
@@ -333,27 +292,24 @@ public final class SegmentationEngine implements AutoCloseable {
         return stable;
     }
 
-    /**
-     * Nettoyage spatial léger et respectueux des cheveux : les zones uniformes sont rendues
-     * plus franches tandis que les zones à fort contraste restent proches du masque ML brut.
-     */
+    /** Nettoyage du matte : fond plus propre, sujet plus plein, bord moins laiteux. */
     private static float[] refineConfidenceMask(float[] source, int width, int height,
                                                 boolean export) {
         if (width < 3 || height < 3) return source;
         float[] output = source.clone();
-        float smoothWeight = export ? 0.22f : 0.16f;
-        float confidenceBoost = export ? 0.12f : 0.08f;
+        float smoothWeight = export ? 0.10f : 0.13f;
+        float confidenceBoost = export ? 0.18f : 0.12f;
 
         for (int y = 1; y < height - 1; y++) {
             int row = y * width;
             for (int x = 1; x < width - 1; x++) {
                 int index = row + x;
                 float center = source[index];
-                if (center <= 0.025f) {
+                if (center <= 0.035f) {
                     output[index] = 0f;
                     continue;
                 }
-                if (center >= 0.985f) {
+                if (center >= 0.975f) {
                     output[index] = 1f;
                     continue;
                 }
@@ -370,16 +326,14 @@ public final class SegmentationEngine implements AutoCloseable {
                 float localAverage = (center * 2f + left + right + top + bottom) / 6f;
                 float value = center;
 
-                // Lisser uniquement les surfaces calmes ; les mèches et contours restent nets.
-                if (localRange < 0.22f && center > 0.10f && center < 0.90f) {
+                if (localRange < 0.16f && center > 0.12f && center < 0.88f) {
                     value = center * (1f - smoothWeight) + localAverage * smoothWeight;
                 }
 
-                // Écraser les voiles de fond et remplir les petits trous à haute confiance.
-                if (localAverage < 0.34f && value < 0.55f) {
-                    value -= (0.55f - value) * confidenceBoost;
-                } else if (localAverage > 0.66f && value > 0.45f) {
-                    value += (value - 0.45f) * confidenceBoost;
+                if (localAverage < 0.38f && value < 0.56f) {
+                    value -= (0.56f - value) * confidenceBoost;
+                } else if (localAverage > 0.62f && value > 0.44f) {
+                    value += (value - 0.44f) * confidenceBoost;
                 }
 
                 output[index] = clamp(value);
@@ -388,35 +342,37 @@ public final class SegmentationEngine implements AutoCloseable {
         return output;
     }
 
-    private static float[] sampleLuma(Bitmap bitmap, int grid) {
-        int width = bitmap.getWidth();
-        int height = bitmap.getHeight();
-        float[] sample = new float[grid * grid];
-        int index = 0;
-        for (int gy = 0; gy < grid; gy++) {
-            int y = Math.min(height - 1,
-                    Math.max(0, Math.round((gy + 0.5f) * height / grid - 0.5f)));
-            for (int gx = 0; gx < grid; gx++) {
-                int x = Math.min(width - 1,
-                        Math.max(0, Math.round((gx + 0.5f) * width / grid - 0.5f)));
-                int color = bitmap.getPixel(x, y);
-                sample[index++] = (0.2126f * Color.red(color)
-                        + 0.7152f * Color.green(color)
-                        + 0.0722f * Color.blue(color)) / 255f;
+    /**
+     * Élimine l'effet « rectangle caméra » quand le torse ou les épaules touchent le bord
+     * de la prise. Les côtés sont très légèrement fondus et le bas est davantage adouci.
+     */
+    private static float[] featherFrameBorders(float[] source, int width, int height,
+                                               boolean export) {
+        if (width < 8 || height < 8) return source;
+        float[] output = source.clone();
+        int sideFeather = Math.max(2, Math.round(width * (export ? 0.020f : 0.015f)));
+        int bottomFeather = Math.max(3, Math.round(height * (export ? 0.035f : 0.025f)));
+
+        for (int y = 0; y < height; y++) {
+            float bottomFactor = 1f;
+            int distanceBottom = height - 1 - y;
+            if (distanceBottom < bottomFeather) {
+                bottomFactor = smooth01((distanceBottom + 1f) / (bottomFeather + 1f));
+            }
+            int row = y * width;
+            for (int x = 0; x < width; x++) {
+                int sideDistance = Math.min(x, width - 1 - x);
+                float sideFactor = sideDistance < sideFeather
+                        ? smooth01((sideDistance + 1f) / (sideFeather + 1f)) : 1f;
+                output[row + x] = clamp(output[row + x] * sideFactor * bottomFactor);
             }
         }
-        return sample;
+        return output;
     }
 
-    private static float meanAbsoluteDifference(float[] left, float[] right) {
-        if (left == null || right == null || left.length != right.length || left.length == 0) {
-            return 1f;
-        }
-        float sum = 0f;
-        for (int index = 0; index < left.length; index++) {
-            sum += Math.abs(left[index] - right[index]);
-        }
-        return sum / left.length;
+    private static float smooth01(float value) {
+        float t = clamp(value);
+        return t * t * (3f - 2f * t);
     }
 
     private static float clamp(float value) {
