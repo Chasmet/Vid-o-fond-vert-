@@ -28,7 +28,7 @@ public final class ModeChooserActivity extends AppCompatActivity {
         classicButton.setOnClickListener(v ->
                 startActivity(new Intent(this, MainActivity.class)));
         musicButton.setOnClickListener(v ->
-                startActivity(new Intent(this, ClipTimelineActivity.class)));
+                startActivity(new Intent(this, ClipTimelineInstantActivity.class)));
         settingsButton.setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
 
@@ -38,9 +38,7 @@ public final class ModeChooserActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (updateBadge != null) {
-            refreshUpdateBadge();
-        }
+        if (updateBadge != null) refreshUpdateBadge();
     }
 
     private void refreshUpdateBadge() {
@@ -49,15 +47,10 @@ public final class ModeChooserActivity extends AppCompatActivity {
         String cachedVersion = preferences.getString(SettingsActivity.KEY_CACHED_VERSION, "");
         showCachedUpdate(cachedAvailable, cachedVersion);
 
-        if (!preferences.getBoolean(SettingsActivity.KEY_AUTO_CHECK, true)) {
-            return;
-        }
-
+        if (!preferences.getBoolean(SettingsActivity.KEY_AUTO_CHECK, true)) return;
         long lastCheck = preferences.getLong(SettingsActivity.KEY_LAST_CHECK, 0L);
         long now = System.currentTimeMillis();
-        if (now - lastCheck < AUTO_CHECK_INTERVAL_MS) {
-            return;
-        }
+        if (now - lastCheck < AUTO_CHECK_INTERVAL_MS) return;
 
         AppUpdateManager.checkLatest(this, new AppUpdateManager.CheckCallback() {
             @Override
@@ -73,8 +66,7 @@ public final class ModeChooserActivity extends AppCompatActivity {
 
             @Override
             public void onError(String message) {
-                // L'accueil reste silencieux en cas de réseau indisponible.
-                // Le détail de l'erreur est visible dans Réglages > Mises à jour.
+                // L'accueil reste silencieux si le réseau est indisponible.
             }
         });
     }
