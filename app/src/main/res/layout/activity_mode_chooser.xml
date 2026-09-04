@@ -8,12 +8,12 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="wrap_content"
         android:gravity="center_horizontal"
         android:orientation="vertical"
-        android:paddingStart="20dp"
-        android:paddingTop="30dp"
-        android:paddingEnd="20dp"
+        android:paddingStart="18dp"
+        android:paddingTop="26dp"
+        android:paddingEnd="18dp"
         android:paddingBottom="24dp">
 
         <TextView
@@ -21,24 +21,24 @@
             android:layout_height="wrap_content"
             android:fontFamily="sans-serif-black"
             android:gravity="center"
-            android:text="CHOISIS TON MODE"
+            android:text="CRÉER UNE VIDÉO"
             android:textColor="@color/ink"
             android:textSize="28sp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
+            android:layout_marginTop="5dp"
             android:gravity="center"
-            android:text="Comme sur TikTok : caméra normale ou fond vert"
+            android:text="Choisis d'abord le format, puis le mode"
             android:textColor="@color/ink_secondary"
-            android:textSize="14sp" />
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/updateBadge"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="12dp"
             android:background="@drawable/bg_badge"
             android:fontFamily="sans-serif-black"
             android:paddingStart="12dp"
@@ -52,10 +52,80 @@
 
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
-            android:layout_height="220dp"
-            android:layout_marginTop="28dp"
+            android:layout_height="142dp"
+            android:layout_marginTop="20dp"
             app:cardBackgroundColor="@color/surface"
-            app:cardCornerRadius="30dp"
+            app:cardCornerRadius="24dp"
+            app:cardElevation="0dp"
+            app:strokeColor="@color/accent"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-black"
+                    android:text="1 · FORMAT DE LA VIDÉO"
+                    android:textColor="@color/ink"
+                    android:textSize="12sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="68dp"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/verticalFormatButton"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="64dp"
+                        android:layout_marginEnd="5dp"
+                        android:layout_weight="1"
+                        android:fontFamily="sans-serif-black"
+                        android:text="VERTICAL&#10;9:16"
+                        android:textColor="@color/ink"
+                        android:textSize="12sp"
+                        app:cornerRadius="18dp"
+                        app:strokeColor="@color/accent" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/horizontalFormatButton"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="64dp"
+                        android:layout_marginStart="5dp"
+                        android:layout_weight="1"
+                        android:fontFamily="sans-serif-black"
+                        android:text="HORIZONTAL&#10;16:9"
+                        android:textColor="@color/ink"
+                        android:textSize="12sp"
+                        app:cornerRadius="18dp"
+                        app:strokeColor="@color/cyan" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/formatStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="Choix obligatoire avant de continuer"
+                    android:textColor="@color/ink_secondary"
+                    android:textSize="10sp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="190dp"
+            android:layout_marginTop="14dp"
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="26dp"
             app:cardElevation="0dp"
             app:strokeColor="@color/surface_high"
             app:strokeWidth="1dp">
@@ -65,30 +135,20 @@
                 android:layout_height="match_parent"
                 android:gravity="center"
                 android:orientation="vertical"
-                android:padding="22dp">
-
-                <TextView
-                    android:layout_width="68dp"
-                    android:layout_height="68dp"
-                    android:background="@drawable/bg_badge"
-                    android:gravity="center"
-                    android:text="●"
-                    android:textColor="@color/ink"
-                    android:textSize="36sp" />
+                android:padding="18dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
                     android:fontFamily="sans-serif-black"
-                    android:text="CLASSIQUE"
+                    android:text="2 · CLASSIQUE"
                     android:textColor="@color/ink"
-                    android:textSize="23sp" />
+                    android:textSize="21sp" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
+                    android:layout_marginTop="5dp"
                     android:gravity="center"
                     android:text="Caméra normale · musique importée · micro coupé"
                     android:textColor="@color/ink_secondary"
@@ -98,11 +158,11 @@
                     android:id="@+id/classicModeButton"
                     android:layout_width="match_parent"
                     android:layout_height="58dp"
-                    android:layout_marginTop="14dp"
+                    android:layout_marginTop="16dp"
                     android:fontFamily="sans-serif-black"
                     android:text="OUVRIR CLASSIQUE"
                     android:textColor="@color/background"
-                    android:textSize="15sp"
+                    android:textSize="14sp"
                     app:backgroundTint="@color/ink"
                     app:cornerRadius="19dp" />
             </LinearLayout>
@@ -110,10 +170,10 @@
 
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
-            android:layout_height="220dp"
-            android:layout_marginTop="14dp"
+            android:layout_height="190dp"
+            android:layout_marginTop="12dp"
             app:cardBackgroundColor="@color/surface"
-            app:cardCornerRadius="30dp"
+            app:cardCornerRadius="26dp"
             app:cardElevation="0dp"
             app:strokeColor="@color/accent"
             app:strokeWidth="2dp">
@@ -123,32 +183,22 @@
                 android:layout_height="match_parent"
                 android:gravity="center"
                 android:orientation="vertical"
-                android:padding="22dp">
-
-                <TextView
-                    android:layout_width="68dp"
-                    android:layout_height="68dp"
-                    android:background="@drawable/bg_badge"
-                    android:gravity="center"
-                    android:text="✂"
-                    android:textColor="@color/accent"
-                    android:textSize="34sp" />
+                android:padding="18dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
                     android:fontFamily="sans-serif-black"
-                    android:text="FOND VERT"
+                    android:text="2 · FOND VERT"
                     android:textColor="@color/accent"
-                    android:textSize="23sp" />
+                    android:textSize="21sp" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
+                    android:layout_marginTop="5dp"
                     android:gravity="center"
-                    android:text="Détourage · musique importée · micro coupé · image ou vidéo"
+                    android:text="Détourage · musique importée · image ou vidéo"
                     android:textColor="@color/ink_secondary"
                     android:textSize="12sp" />
 
@@ -156,11 +206,11 @@
                     android:id="@+id/greenModeButton"
                     android:layout_width="match_parent"
                     android:layout_height="58dp"
-                    android:layout_marginTop="14dp"
+                    android:layout_marginTop="16dp"
                     android:fontFamily="sans-serif-black"
                     android:text="OUVRIR FOND VERT"
                     android:textColor="@color/background"
-                    android:textSize="15sp"
+                    android:textSize="14sp"
                     app:backgroundTint="@color/accent"
                     app:cornerRadius="19dp" />
             </LinearLayout>
@@ -171,7 +221,7 @@
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="54dp"
-            android:layout_marginTop="18dp"
+            android:layout_marginTop="16dp"
             android:fontFamily="sans-serif-black"
             android:text="⚙  RÉGLAGES · MISES À JOUR"
             android:textColor="@color/ink"
