@@ -300,7 +300,7 @@ public final class MainActivity extends AppCompatActivity {
         }
         if (!cameraGranted || !audioGranted) {
             permissionLauncher.launch(new String[]{
-                    Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO});
+                    Manifest.permission.CAMERA});
         }
     }
 
@@ -422,10 +422,8 @@ public final class MainActivity extends AppCompatActivity {
                 "camera_source_" + System.currentTimeMillis() + ".mp4");
         FileOutputOptions options = new FileOutputOptions.Builder(activeRawFile).build();
         PendingRecording pending = videoCapture.getOutput().prepareRecording(this, options);
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                == PackageManager.PERMISSION_GRANTED) {
-            pending = pending.withAudioEnabled();
-        }
+        // Micro volontairement désactivé dans toute l'application.
+        // L'audio final doit provenir uniquement d'un fichier importé.
         if (backgroundSpec.getType() == BackgroundSpec.Type.VIDEO) {
             backgroundVideo.seekTo(0);
             backgroundVideo.start();
