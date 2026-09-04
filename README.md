@@ -2,19 +2,20 @@
 
 Application Android native pour filmer une personne détourée devant un décor image ou vidéo, sans serveur payant.
 
-Version **1.12.0** : montage timeline accéléré, détourage temporel renforcé et nouvelle identité visuelle.
+Version **1.12.8** : choix obligatoire 9:16/16:9, détection automatique du début de chanson et timeline audio réglable.
 
-## Nouveautés v1.12.0
+## Nouveautés v1.12.8
 
-- lecture des prises vidéo par lots sur Android 9+ pour réduire fortement les seeks image par image pendant le montage ;
-- retour automatique à la méthode classique sur les appareils incompatibles ;
-- segmentation d'export en mode vidéo temporel ;
-- réutilisation d'un masque pendant une seule frame lorsque deux images sont réellement quasi identiques ;
-- nouvelle inférence immédiate dès qu'un mouvement important est détecté ;
-- remise à zéro du masque à chaque nouveau plan pour éviter les silhouettes fantômes ;
-- nettoyage spatial des contours : halos réduits, petits trous corrigés, détails fins mieux préservés ;
-- nouveau logo vectoriel Fond Vert Studio ;
-- versionCode 19 / versionName 1.12.0.
+- choix obligatoire du format avant la caméra : **Vertical 9:16** ou **Horizontal 16:9** ;
+- interface paysage dédiée pour Classique et Fond Vert ;
+- rendu Fond Vert réellement encodé dans le format sélectionné (1080×1920 / 1920×1080 ou 720p équivalent) ;
+- analyse automatique de la musique après import pour détecter le premier passage réellement audible ;
+- le silence placé avant la chanson est ignoré automatiquement ;
+- le départ détecté est placé directement sur la timeline ;
+- réglage manuel conservé avec la SeekBar ;
+- boutons **−0,1 s / AUTO / +0,1 s** pour ajuster précisément le départ ;
+- la musique reste l'unique piste audio et le micro reste coupé ;
+- versionCode 27 / versionName 1.12.8.
 
 ## Fonctions
 
