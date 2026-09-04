@@ -373,7 +373,7 @@
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/musicCard"
         android:layout_width="0dp"
-        android:layout_height="144dp"
+        android:layout_height="178dp"
         android:layout_marginStart="9dp"
         android:layout_marginEnd="9dp"
         android:layout_marginBottom="6dp"
@@ -480,6 +480,53 @@
                     android:text="Choisis le départ du son"
                     android:textColor="@color/accent"
                     android:textSize="8sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/audioMinusButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:text="- 0,1 s"
+                    android:textColor="@color/ink"
+                    android:textSize="8sp"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="@color/surface_high" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/audioAutoButton"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_marginStart="5dp"
+                    android:layout_marginEnd="5dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:text="AUTO"
+                    android:textColor="@color/background"
+                    android:textSize="8sp"
+                    app:backgroundTint="@color/accent"
+                    app:cornerRadius="12dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/audioPlusButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:text="+ 0,1 s"
+                    android:textColor="@color/ink"
+                    android:textSize="8sp"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="@color/surface_high" />
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
