@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/classicPreview"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:implementationMode="performance"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:scaleType="fillCenter" />
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="88dp"
+        android:background="#66000000"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/classicBackButton"
+        style="@style/Widget.MaterialComponents.Button.TextButton"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="24dp"
+        android:minWidth="0dp"
+        android:text="‹"
+        android:textColor="@android:color/white"
+        android:textSize="30sp"
+        app:backgroundTint="#33000000"
+        app:cornerRadius="24dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/classicMicStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:fontFamily="sans-serif-black"
+        android:text="MODE CLASSIQUE · MICRO DU TÉLÉPHONE"
+        android:textColor="@android:color/white"
+        android:textSize="11sp"
+        app:layout_constraintEnd_toStartOf="@id/classicQualityButton"
+        app:layout_constraintStart_toEndOf="@id/classicBackButton"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/classicQualityButton"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="72dp"
+        android:layout_height="40dp"
+        android:layout_marginTop="26dp"
+        android:layout_marginEnd="10dp"
+        android:minWidth="0dp"
+        android:text="1080p"
+        android:textColor="@android:color/white"
+        android:textSize="10sp"
+        app:cornerRadius="16dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:strokeColor="#AAFFFFFF" />
+
+    <TextView
+        android:id="@+id/classicTimer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="96dp"
+        android:background="#B0000000"
+        android:fontFamily="sans-serif-black"
+        android:paddingStart="14dp"
+        android:paddingTop="7dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="7dp"
+        android:text="00:00"
+        android:textColor="@android:color/white"
+        android:textSize="14sp"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/classicFlipButton"
+        style="@style/Widget.MaterialComponents.Button.TextButton"
+        android:layout_width="54dp"
+        android:layout_height="54dp"
+        android:layout_marginEnd="18dp"
+        android:layout_marginBottom="36dp"
+        android:minWidth="0dp"
+        android:text="↻"
+        android:textColor="@android:color/white"
+        android:textSize="24sp"
+        app:backgroundTint="#99000000"
+        app:cornerRadius="27dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/classicRecordButton"
+        android:layout_width="176dp"
+        android:layout_height="66dp"
+        android:layout_marginBottom="30dp"
+        android:fontFamily="sans-serif-black"
+        android:text="●  FILMER"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        app:backgroundTint="@color/danger"
+        app:cornerRadius="33dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
