@@ -269,6 +269,9 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         });
         recordButton.setText("CAMÉRA…");
         recordButton.setEnabled(false);
+        audioMinusButton.setEnabled(false);
+        audioAutoButton.setEnabled(false);
+        audioPlusButton.setEnabled(false);
         finishButton.setOnClickListener(v -> finishSession());
         downloadButton.setOnClickListener(v -> downloadVideo());
         flipCameraButton.setOnClickListener(v -> {
@@ -486,10 +489,10 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
                     audioMinusButton.setEnabled(true);
                     audioAutoButton.setEnabled(true);
                     audioPlusButton.setEnabled(true);
+                    updateStartButton();
                     clipStatus.setText("DÉBUT DÉTECTÉ · "
                             + formatPrecise(finalDetected)
                             + " · ajuste si besoin");
-                    updateStartButton();
                 });
             } catch (Exception error) {
                 if (destination.exists()) destination.delete();
