@@ -129,6 +129,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
     private volatile float liveCenterY = SubjectTransformTimeline.DEFAULT_CENTER_Y;
     private int quality = 1080;
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
+    private boolean cameraReady;
 
     private static final float THRESHOLD = 0.52f;
     private static final float SOFTNESS = 0.040f;
@@ -253,6 +254,8 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             else if (activeRecording != null) pausePlan();
             else if (paused) resumePlan();
         });
+        recordButton.setText("CAMÉRA…");
+        recordButton.setEnabled(false);
         finishButton.setOnClickListener(v -> finishSession());
         downloadButton.setOnClickListener(v -> downloadVideo());
         flipCameraButton.setOnClickListener(v -> {
@@ -298,6 +301,8 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
 
     private void startCamera() {
         if (segmenter == null || activeRecording != null) return;
+        cameraReady = false;
+        updateStartButton();
         ListenableFuture<ProcessCameraProvider> future = ProcessCameraProvider.getInstance(this);
         future.addListener(() -> {
             try {
@@ -332,7 +337,11 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         analysis.setAnalyzer(cameraExecutor, this::analyzeFrame);
         try {
             cameraProvider.bindToLifecycle(this, cameraSelector, analysis, videoCapture);
+            cameraReady = true;
+            updateStartButton();
         } catch (Exception error) {
+            cameraReady = false;
+            updateStartButton();
             showError("Mode caméra non disponible");
         }
     }
@@ -447,15 +456,15 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
                     preparedAudioFile = generated ? destination : null;
                     if (!generated && destination.exists()) destination.delete();
                     audioPreparing = false;
-                    recordButton.setEnabled(true);
-                    clipStatus.setText("Musique prête · fin du montage instantanée");
+                    clipStatus.setText("Musique prête · MICRO COUPÉ · audio importé uniquement");
+                    updateStartButton();
                 });
             } catch (Exception error) {
                 if (destination.exists()) destination.delete();
                 runOnUiThread(() -> {
                     audioPreparing = false;
                     preparedMusicUri = null;
-                    recordButton.setEnabled(true);
+                    updateStartButton();
                     showError("Préparation audio impossible : " + error.getMessage());
                 });
             }
@@ -464,14 +473,21 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
 
     private void startSession() {
         if (!musicPrepared || musicUri == null) {
-            Toast.makeText(this, "Importe la musique d'abord", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this,
+                    "Importe une musique : le micro reste toujours coupé",
+                    Toast.LENGTH_LONG).show();
+            audioPicker.launch(new String[]{"audio/*"});
             return;
         }
         if (audioPreparing || preparedMusicUri == null) {
             Toast.makeText(this, "Préparation de la musique en cours", Toast.LENGTH_SHORT).show();
             return;
         }
-        if (videoCapture == null) return;
+        if (!cameraReady || videoCapture == null) {
+            Toast.makeText(this, "Caméra en préparation…", Toast.LENGTH_SHORT).show();
+            startCamera();
+            return;
+        }
         cleanupSessionFiles();
         sourceTimeline.clear();
         accumulatedMs = 0L;
@@ -502,17 +518,26 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         Uri bgUri = backgroundSpec.getUri();
         int bgColor = backgroundSpec.getColor();
         String label = currentDecorLabel;
-        if (realtimeRecorder != null) realtimeRecorder.beginPlan(type, bgUri, bgColor);
+        if (realtimeRecorder != null) {
+            try {
+                realtimeRecorder.beginPlan(type, bgUri, bgColor);
+            } catch (Exception renderError) {
+                realtimeRecorder.close();
+                realtimeRecorder = null;
+            }
+        }
 
         PendingRecording pending = videoCapture.getOutput().prepareRecording(
                 this, new FileOutputOptions.Builder(segment).build());
+        // Aucun withAudioEnabled() : le micro est toujours coupé.
         setControlsForRecording(true);
-        activeRecording = pending.start(ContextCompat.getMainExecutor(this), event -> {
+        try {
+            activeRecording = pending.start(ContextCompat.getMainExecutor(this), event -> {
             if (event instanceof VideoRecordEvent.Start) {
                 segmentStartedAt = SystemClock.elapsedRealtime();
                 realtimePlanStartedAt = segmentStartedAt;
                 realtimePlanBaseUs = accumulatedMs * 1000L;
-                realtimeCaptureActive = true;
+                realtimeCaptureActive = realtimeRecorder != null;
                 stopRequested = false;
                 paused = false;
                 recordingTimer.setVisibility(View.VISIBLE);
@@ -530,6 +555,16 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
                 handleFinalizedPlan(finalEvent, segment, type, bgUri, bgColor, label);
             }
         });
+        } catch (Exception startError) {
+            activeRecording = null;
+            realtimeCaptureActive = false;
+            sessionActive = false;
+            paused = false;
+            stopRequested = false;
+            setIdleControlsEnabled(true);
+            updateStartButton();
+            showError("Impossible de démarrer la caméra : " + startError.getMessage());
+        }
     }
 
     private void pausePlan() {
@@ -545,12 +580,16 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
     private void handleFinalizedPlan(VideoRecordEvent.Finalize event, File segment,
                                      BackgroundSpec.Type type, Uri bgUri,
                                      int bgColor, String label) {
-        if (event.getError() != VideoRecordEvent.Finalize.ERROR_NONE
-                || !segment.isFile() || segment.length() <= 0L) {
+        if (!segment.isFile() || segment.length() <= 0L) {
             deleteFile(segment);
             showError("Plan non enregistré");
             showIdle();
             return;
+        }
+        if (event.getError() != VideoRecordEvent.Finalize.ERROR_NONE) {
+            Toast.makeText(this,
+                    "Plan récupéré malgré un avertissement caméra",
+                    Toast.LENGTH_SHORT).show();
         }
         long duration = videoDuration(segment);
         if (duration <= 0L) duration = Math.max(1L,
@@ -729,9 +768,8 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
                     renderedClipFile = null;
                     downloadButton.setVisibility(View.GONE);
                     recordButton.setVisibility(View.VISIBLE);
-                    recordButton.setEnabled(preparedMusicUri != null && !audioPreparing);
-                    recordButton.setText("● NOUVEAU TOURNAGE");
                     setIdleControlsEnabled(true);
+                    updateStartButton();
                     clipStatus.setText("Vidéo enregistrée dans la galerie");
                     Snackbar.make(recordButton, "Vidéo enregistrée", Snackbar.LENGTH_LONG)
                             .setAction("Ouvrir", v -> {
@@ -862,9 +900,26 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         recordingTimer.setVisibility(View.GONE);
         finishButton.setVisibility(View.GONE);
         recordButton.setVisibility(View.VISIBLE);
-        recordButton.setText("● TOURNER");
-        recordButton.setEnabled(preparedMusicUri != null && !audioPreparing);
         setIdleControlsEnabled(true);
+        updateStartButton();
+    }
+
+    private void updateStartButton() {
+        if (sessionActive || activeRecording != null || renderedClipFile != null) return;
+        if (!cameraReady) {
+            recordButton.setEnabled(false);
+            recordButton.setText("CAMÉRA…");
+            clipStatus.setText("Préparation caméra…");
+            return;
+        }
+        recordButton.setEnabled(!audioPreparing);
+        if (preparedMusicUri == null) {
+            recordButton.setText("♪ IMPORTE MUSIQUE");
+            clipStatus.setText("MICRO COUPÉ · importe une musique pour tourner");
+        } else {
+            recordButton.setText("● TOURNER");
+            clipStatus.setText("PRÊT · MICRO COUPÉ · audio importé uniquement");
+        }
     }
 
     private void setControlsForRecording(boolean recording) {
