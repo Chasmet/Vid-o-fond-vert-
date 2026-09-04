@@ -90,7 +90,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:gravity="center"
-                    android:text="Caméra normale · aucun détourage · aucun fond"
+                    android:text="Caméra normale · musique importée · micro coupé"
                     android:textColor="@color/ink_secondary"
                     android:textSize="12sp" />
 
@@ -148,7 +148,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:gravity="center"
-                    android:text="Détourage · image ou vidéo derrière toi · clips musique"
+                    android:text="Détourage · musique importée · micro coupé · image ou vidéo"
                     android:textColor="@color/ink_secondary"
                     android:textSize="12sp" />
 
