@@ -103,7 +103,7 @@
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/classicAudioCard"
         android:layout_width="0dp"
-        android:layout_height="126dp"
+        android:layout_height="164dp"
         android:layout_marginStart="12dp"
         android:layout_marginEnd="12dp"
         android:layout_marginBottom="112dp"
@@ -171,6 +171,53 @@
                 android:layout_height="34dp"
                 android:max="1000"
                 android:progress="0" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/classicAudioMinusButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:text="- 0,1 s"
+                    android:textColor="@android:color/white"
+                    android:textSize="8sp"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="#77FFFFFF" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/classicAudioAutoButton"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_marginStart="5dp"
+                    android:layout_marginEnd="5dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:text="AUTO"
+                    android:textColor="@color/background"
+                    android:textSize="8sp"
+                    app:backgroundTint="@color/accent"
+                    app:cornerRadius="12dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/classicAudioPlusButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:text="+ 0,1 s"
+                    android:textColor="@android:color/white"
+                    android:textSize="8sp"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="#77FFFFFF" />
+            </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
