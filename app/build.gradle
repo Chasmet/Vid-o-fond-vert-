@@ -10,8 +10,8 @@ android {
         applicationId 'com.chasmet.fondvertstudio'
         minSdk 21
         targetSdk 34
-        versionCode 26
-        versionName '1.12.7'
+        versionCode 27
+        versionName '1.12.8'
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         vectorDrawables.useSupportLibrary = true

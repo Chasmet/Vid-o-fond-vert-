@@ -54,7 +54,7 @@
             android:name=".ClassicCameraActivity"
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:exported="false"
-            android:screenOrientation="portrait" />
+            android:screenOrientation="unspecified" />
 
         <activity
             android:name=".MainActivity"
@@ -78,7 +78,7 @@
             android:name=".ClipTimelineInstantActivity"
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:exported="false"
-            android:screenOrientation="portrait" />
+            android:screenOrientation="unspecified" />
     </application>
 
 </manifest>

@@ -19,7 +19,7 @@
 
     <View
         android:layout_width="0dp"
-        android:layout_height="94dp"
+        android:layout_height="66dp"
         android:background="#77000000"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -31,7 +31,7 @@
         android:layout_width="48dp"
         android:layout_height="48dp"
         android:layout_marginStart="8dp"
-        android:layout_marginTop="24dp"
+        android:layout_marginTop="8dp"
         android:minWidth="0dp"
         android:text="‹"
         android:textColor="@android:color/white"
@@ -44,33 +44,33 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="30dp"
+        android:layout_marginStart="10dp"
         android:fontFamily="sans-serif-black"
-        android:text="CLASSIQUE"
+        android:text="CLASSIQUE · HORIZONTAL 16:9"
         android:textColor="@android:color/white"
-        android:textSize="16sp"
-        app:layout_constraintEnd_toStartOf="@id/classicQualityButton"
+        android:textSize="15sp"
+        app:layout_constraintBottom_toBottomOf="@id/classicBackButton"
         app:layout_constraintStart_toEndOf="@id/classicBackButton"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="@id/classicBackButton" />
 
     <TextView
         android:id="@+id/classicAudioStatus"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="52dp"
+        android:layout_marginEnd="86dp"
         android:text="MICRO COUPÉ · IMPORTE UNE MUSIQUE"
         android:textColor="#CCFFFFFF"
         android:textSize="9sp"
-        app:layout_constraintEnd_toStartOf="@id/classicQualityButton"
-        app:layout_constraintStart_toEndOf="@id/classicBackButton"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintBottom_toBottomOf="@id/classicBackButton"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/classicBackButton" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/classicQualityButton"
         style="@style/Widget.MaterialComponents.Button.OutlinedButton"
         android:layout_width="72dp"
         android:layout_height="40dp"
-        android:layout_marginTop="26dp"
+        android:layout_marginTop="12dp"
         android:layout_marginEnd="10dp"
         android:minWidth="0dp"
         android:text="1080p"
@@ -85,7 +85,7 @@
         android:id="@+id/classicTimer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="106dp"
+        android:layout_marginTop="76dp"
         android:background="#B0000000"
         android:fontFamily="sans-serif-black"
         android:paddingStart="14dp"
@@ -103,15 +103,15 @@
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/classicAudioCard"
         android:layout_width="0dp"
-        android:layout_height="164dp"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="12dp"
-        android:layout_marginBottom="112dp"
-        app:cardBackgroundColor="#DD111319"
-        app:cardCornerRadius="20dp"
+        android:layout_height="156dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginBottom="10dp"
+        app:cardBackgroundColor="#E0111319"
+        app:cardCornerRadius="18dp"
         app:cardElevation="0dp"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/classicRecordButton"
         app:layout_constraintStart_toStartOf="parent"
         app:strokeColor="#44FFFFFF"
         app:strokeWidth="1dp">
@@ -120,62 +120,59 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="vertical"
-            android:padding="9dp">
+            android:padding="8dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:gravity="center_vertical"
+                android:layout_height="40dp"
                 android:orientation="horizontal">
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/classicImportAudioButton"
                     android:layout_width="0dp"
-                    android:layout_height="42dp"
+                    android:layout_height="40dp"
                     android:layout_weight="1"
                     android:fontFamily="sans-serif-black"
                     android:text="♪ IMPORTER MUSIQUE"
                     android:textColor="@color/background"
-                    android:textSize="10sp"
+                    android:textSize="9sp"
                     app:backgroundTint="@color/accent"
-                    app:cornerRadius="14dp" />
+                    app:cornerRadius="13dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/classicMusicPlayButton"
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                    android:layout_width="94dp"
-                    android:layout_height="42dp"
-                    android:layout_marginStart="6dp"
+                    android:layout_width="88dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="5dp"
                     android:minWidth="0dp"
                     android:text="▶ ÉCOUTER"
                     android:textColor="@android:color/white"
                     android:textSize="8sp"
-                    app:cornerRadius="14dp"
+                    app:cornerRadius="13dp"
                     app:strokeColor="#77FFFFFF" />
             </LinearLayout>
 
             <TextView
                 android:id="@+id/classicAudioName"
                 android:layout_width="match_parent"
-                android:layout_height="22dp"
+                android:layout_height="20dp"
                 android:ellipsize="end"
-                android:gravity="center_vertical"
                 android:maxLines="1"
                 android:text="Aucune musique sélectionnée"
                 android:textColor="@android:color/white"
-                android:textSize="10sp" />
+                android:textSize="9sp" />
 
             <SeekBar
                 android:id="@+id/classicMusicSeekBar"
                 android:layout_width="match_parent"
-                android:layout_height="34dp"
+                android:layout_height="32dp"
                 android:max="1000"
                 android:progress="0" />
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="34dp"
-                android:gravity="center"
                 android:orientation="horizontal">
 
                 <com.google.android.material.button.MaterialButton
@@ -185,25 +182,25 @@
                     android:layout_height="32dp"
                     android:layout_weight="1"
                     android:minWidth="0dp"
-                    android:text="- 0,1 s"
+                    android:text="-0,1s"
                     android:textColor="@android:color/white"
                     android:textSize="8sp"
-                    app:cornerRadius="12dp"
+                    app:cornerRadius="11dp"
                     app:strokeColor="#77FFFFFF" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/classicAudioAutoButton"
                     android:layout_width="0dp"
                     android:layout_height="32dp"
-                    android:layout_marginStart="5dp"
-                    android:layout_marginEnd="5dp"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginEnd="4dp"
                     android:layout_weight="1"
                     android:minWidth="0dp"
                     android:text="AUTO"
                     android:textColor="@color/background"
                     android:textSize="8sp"
                     app:backgroundTint="@color/accent"
-                    app:cornerRadius="12dp" />
+                    app:cornerRadius="11dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/classicAudioPlusButton"
@@ -212,14 +209,29 @@
                     android:layout_height="32dp"
                     android:layout_weight="1"
                     android:minWidth="0dp"
-                    android:text="+ 0,1 s"
+                    android:text="+0,1s"
                     android:textColor="@android:color/white"
                     android:textSize="8sp"
-                    app:cornerRadius="12dp"
+                    app:cornerRadius="11dp"
                     app:strokeColor="#77FFFFFF" />
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/classicRecordButton"
+        android:layout_width="205dp"
+        android:layout_height="66dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="18dp"
+        android:fontFamily="sans-serif-black"
+        android:text="♪ IMPORTER UNE MUSIQUE"
+        android:textColor="@android:color/white"
+        android:textSize="13sp"
+        app:backgroundTint="@color/danger"
+        app:cornerRadius="33dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/classicFlipButton"
@@ -227,7 +239,7 @@
         android:layout_width="54dp"
         android:layout_height="54dp"
         android:layout_marginEnd="18dp"
-        android:layout_marginBottom="32dp"
+        android:layout_marginBottom="92dp"
         android:minWidth="0dp"
         android:text="↻"
         android:textColor="@android:color/white"
@@ -236,20 +248,5 @@
         app:cornerRadius="27dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/classicRecordButton"
-        android:layout_width="210dp"
-        android:layout_height="66dp"
-        android:layout_marginBottom="26dp"
-        android:fontFamily="sans-serif-black"
-        android:text="♪ IMPORTER UNE MUSIQUE"
-        android:textColor="@android:color/white"
-        android:textSize="14sp"
-        app:backgroundTint="@color/danger"
-        app:cornerRadius="33dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

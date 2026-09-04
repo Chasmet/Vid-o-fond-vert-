@@ -1,0 +1,556 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:id="@+id/clipTopBar"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/backButton"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="44dp"
+            android:layout_height="42dp"
+            android:minWidth="0dp"
+            android:text="‹"
+            android:textColor="@color/ink"
+            android:textSize="26sp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-black"
+                android:text="♪ FOND VERT · HORIZONTAL 16:9"
+                android:textColor="@color/accent"
+                android:textSize="14sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Début audio auto · timeline réglable"
+                android:textColor="@color/ink_secondary"
+                android:textSize="8sp" />
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/qualityButton"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="66dp"
+            android:layout_height="38dp"
+            android:minWidth="0dp"
+            android:text="1080p"
+            android:textColor="@color/ink"
+            android:textSize="9sp"
+            app:cornerRadius="13dp"
+            app:strokeColor="@color/surface_high" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:padding="6dp">
+
+        <FrameLayout
+            android:id="@+id/previewContainer"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="6dp"
+            android:layout_weight="1.25"
+            android:background="#000000">
+
+            <ImageView
+                android:id="@+id/backgroundImage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:visibility="gone" />
+
+            <com.chasmet.fondvertstudio.FillVideoView
+                android:id="@+id/backgroundVideo"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <com.chasmet.fondvertstudio.MaskedCameraView
+                android:id="@+id/subjectPreview"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <TextView
+                android:id="@+id/previewHint"
+                android:layout_width="250dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:text="Tourne ton premier plan.&#10;Pause, change le décor, puis reprends."
+                android:textColor="#EEFFFFFF"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/recordingTimer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|center_horizontal"
+                android:layout_marginTop="7dp"
+                android:background="@drawable/bg_record_badge"
+                android:fontFamily="sans-serif-black"
+                android:paddingStart="10dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="4dp"
+                android:text="00:00"
+                android:textColor="@color/ink"
+                android:textSize="11sp"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/flipCameraButton"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_gravity="top|end"
+                android:layout_margin="6dp"
+                app:backgroundTint="#B3090C11"
+                app:cornerRadius="22dp"
+                app:icon="@drawable/ic_flip"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconTint="@color/ink" />
+
+            <TextView
+                android:id="@+id/transformHint"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:layout_gravity="bottom|start"
+                android:layout_margin="6dp"
+                android:background="@drawable/bg_badge"
+                android:gravity="center"
+                android:paddingStart="7dp"
+                android:paddingEnd="7dp"
+                android:text="Glisse · pince pour zoomer"
+                android:textColor="@color/ink"
+                android:textSize="8sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/resetSubjectButton"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:layout_gravity="bottom|end"
+                android:layout_margin="6dp"
+                android:minWidth="0dp"
+                android:text="↺ 100 %"
+                android:textColor="@color/accent"
+                android:textSize="8sp"
+                app:backgroundTint="#C9090C11"
+                app:cornerRadius="12dp" />
+
+            <LinearLayout
+                android:id="@+id/processingOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#E6090C11"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="18dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-black"
+                    android:text="MONTAGE EN COURS"
+                    android:textColor="@color/ink"
+                    android:textSize="14sp" />
+
+                <ProgressBar
+                    android:id="@+id/processingProgress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="220dp"
+                    android:layout_height="9dp"
+                    android:layout_marginTop="10dp"
+                    android:max="100"
+                    android:progress="0"
+                    android:progressTint="@color/accent" />
+
+                <TextView
+                    android:id="@+id/processingText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Finalisation…"
+                    android:textColor="@color/ink_secondary"
+                    android:textSize="10sp" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <ScrollView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:scrollbars="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/timelineCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="72dp"
+                    app:cardBackgroundColor="@color/surface"
+                    app:cardCornerRadius="15dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/surface_high"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:padding="6dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="18dp"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:fontFamily="sans-serif-black"
+                                android:text="TIMELINE"
+                                android:textColor="@color/ink"
+                                android:textSize="9sp" />
+
+                            <TextView
+                                android:id="@+id/timelineStatus"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="0 plan · prêt"
+                                android:textColor="@color/accent"
+                                android:textSize="8sp" />
+                        </LinearLayout>
+
+                        <HorizontalScrollView
+                            android:layout_width="match_parent"
+                            android:layout_height="46dp"
+                            android:scrollbars="none">
+
+                            <LinearLayout
+                                android:id="@+id/timelineTrack"
+                                android:layout_width="wrap_content"
+                                android:layout_height="46dp"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal" />
+                        </HorizontalScrollView>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/decorCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="62dp"
+                    android:layout_marginTop="5dp"
+                    app:cardBackgroundColor="@color/surface"
+                    app:cardCornerRadius="15dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/surface_high"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:padding="6dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:gravity="center_vertical"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:fontFamily="sans-serif-black"
+                                android:text="DÉCOR"
+                                android:textColor="@color/ink"
+                                android:textSize="9sp" />
+
+                            <TextView
+                                android:id="@+id/decorStatus"
+                                android:layout_width="80dp"
+                                android:layout_height="wrap_content"
+                                android:ellipsize="end"
+                                android:maxLines="1"
+                                android:text="Fond vert"
+                                android:textColor="@color/accent"
+                                android:textSize="8sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/importImageButton"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="58dp"
+                            android:layout_height="38dp"
+                            android:minWidth="0dp"
+                            android:text="IMAGE"
+                            android:textColor="@color/ink"
+                            android:textSize="7sp"
+                            app:cornerRadius="12dp"
+                            app:strokeColor="@color/accent" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/importVideoButton"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="58dp"
+                            android:layout_height="38dp"
+                            android:layout_marginStart="4dp"
+                            android:minWidth="0dp"
+                            android:text="VIDÉO"
+                            android:textColor="@color/ink"
+                            android:textSize="7sp"
+                            app:cornerRadius="12dp"
+                            app:strokeColor="@color/cyan" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/greenBackgroundButton"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="48dp"
+                            android:layout_height="38dp"
+                            android:layout_marginStart="4dp"
+                            android:minWidth="0dp"
+                            android:text="VERT"
+                            android:textColor="@color/ink"
+                            android:textSize="7sp"
+                            app:cornerRadius="12dp"
+                            app:strokeColor="@color/surface_high" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/musicCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="174dp"
+                    android:layout_marginTop="5dp"
+                    app:cardBackgroundColor="@color/surface"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/accent"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:padding="7dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="38dp"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/importAudioButton"
+                                android:layout_width="0dp"
+                                android:layout_height="38dp"
+                                android:layout_weight="1"
+                                android:fontFamily="sans-serif-black"
+                                android:text="♪ IMPORTER"
+                                android:textColor="@color/background"
+                                android:textSize="8sp"
+                                app:backgroundTint="@color/accent"
+                                app:cornerRadius="12dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/downloadsMusicButton"
+                                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                                android:layout_width="78dp"
+                                android:layout_height="38dp"
+                                android:layout_marginStart="4dp"
+                                android:minWidth="0dp"
+                                android:text="↓ FICHIERS"
+                                android:textColor="@color/cyan"
+                                android:textSize="7sp"
+                                app:cornerRadius="12dp"
+                                app:strokeColor="@color/cyan" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/musicPlayButton"
+                                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                                android:layout_width="72dp"
+                                android:layout_height="38dp"
+                                android:layout_marginStart="4dp"
+                                android:minWidth="0dp"
+                                android:text="▶ ÉCOUTER"
+                                android:textColor="@color/ink"
+                                android:textSize="7sp"
+                                app:cornerRadius="12dp"
+                                app:strokeColor="@color/surface_high" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/audioName"
+                            android:layout_width="match_parent"
+                            android:layout_height="18dp"
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="Aucune musique sélectionnée"
+                            android:textColor="@color/ink_secondary"
+                            android:textSize="8sp" />
+
+                        <SeekBar
+                            android:id="@+id/musicSeekBar"
+                            android:layout_width="match_parent"
+                            android:layout_height="30dp"
+                            android:max="1000"
+                            android:progress="0" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="24dp"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:id="@+id/musicPosition"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="00:00 / 00:00"
+                                android:textColor="@color/ink"
+                                android:textSize="9sp" />
+
+                            <TextView
+                                android:id="@+id/clipStatus"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:maxWidth="190dp"
+                                android:text="Début audio automatique"
+                                android:textColor="@color/accent"
+                                android:textSize="7sp" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="34dp"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/audioMinusButton"
+                                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="32dp"
+                                android:layout_weight="1"
+                                android:minWidth="0dp"
+                                android:text="-0,1s"
+                                android:textColor="@color/ink"
+                                android:textSize="7sp"
+                                app:cornerRadius="11dp"
+                                app:strokeColor="@color/surface_high" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/audioAutoButton"
+                                android:layout_width="0dp"
+                                android:layout_height="32dp"
+                                android:layout_marginStart="4dp"
+                                android:layout_marginEnd="4dp"
+                                android:layout_weight="1"
+                                android:minWidth="0dp"
+                                android:text="AUTO"
+                                android:textColor="@color/background"
+                                android:textSize="7sp"
+                                app:backgroundTint="@color/accent"
+                                app:cornerRadius="11dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/audioPlusButton"
+                                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="32dp"
+                                android:layout_weight="1"
+                                android:minWidth="0dp"
+                                android:text="+0,1s"
+                                android:textColor="@color/ink"
+                                android:textSize="7sp"
+                                app:cornerRadius="11dp"
+                                app:strokeColor="@color/surface_high" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <LinearLayout
+                    android:id="@+id/recordBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="76dp"
+                    android:layout_marginTop="5dp"
+                    android:gravity="center"
+                    android:orientation="horizontal"
+                    android:padding="6dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/recordButton"
+                        android:layout_width="0dp"
+                        android:layout_height="60dp"
+                        android:layout_weight="1"
+                        android:fontFamily="sans-serif-black"
+                        android:text="● TOURNER"
+                        android:textColor="@color/ink"
+                        android:textSize="12sp"
+                        app:backgroundTint="@color/danger"
+                        app:cornerRadius="17dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/finishButton"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="96dp"
+                        android:layout_height="60dp"
+                        android:layout_marginStart="5dp"
+                        android:fontFamily="sans-serif-black"
+                        android:text="TERMINER"
+                        android:textColor="@color/accent"
+                        android:textSize="8sp"
+                        android:visibility="gone"
+                        app:cornerRadius="17dp"
+                        app:strokeColor="@color/accent" />
+
+                    <com.chasmet.fondvertstudio.FinalDownloadButton
+                        android:id="@+id/downloadButton"
+                        android:layout_width="0dp"
+                        android:layout_height="60dp"
+                        android:layout_weight="1"
+                        android:fontFamily="sans-serif-black"
+                        android:text="↓ TÉLÉCHARGER LA VIDÉO"
+                        android:textColor="@color/background"
+                        android:textSize="10sp"
+                        android:visibility="gone"
+                        app:backgroundTint="@color/accent"
+                        app:cornerRadius="17dp" />
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+
+</LinearLayout>

@@ -90,6 +90,9 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
     private MaterialButton importAudioButton;
     private MaterialButton downloadsMusicButton;
     private MaterialButton musicPlayButton;
+    private MaterialButton audioMinusButton;
+    private MaterialButton audioAutoButton;
+    private MaterialButton audioPlusButton;
     private SeekBar musicSeekBar;
 
     private ProcessCameraProvider cameraProvider;
@@ -110,6 +113,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
     private boolean musicPrepared;
     private volatile boolean audioPreparing;
     private int clipAudioStartMs;
+    private int detectedAudioStartMs;
 
     private File currentSegmentFile;
     private File renderedClipFile;
@@ -130,6 +134,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
     private int quality = 1080;
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
     private boolean cameraReady;
+    private boolean horizontalFormat;
 
     private static final float THRESHOLD = 0.52f;
     private static final float SOFTNESS = 0.040f;
@@ -156,6 +161,8 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        horizontalFormat = CaptureFormat.isHorizontal(getIntent());
+        CaptureFormat.applyRequestedOrientation(this, getIntent());
         setContentView(R.layout.activity_clip_timeline);
         bindViews();
         registerPickers();
@@ -195,6 +202,9 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         importAudioButton = findViewById(R.id.importAudioButton);
         downloadsMusicButton = findViewById(R.id.downloadsMusicButton);
         musicPlayButton = findViewById(R.id.musicPlayButton);
+        audioMinusButton = findViewById(R.id.audioMinusButton);
+        audioAutoButton = findViewById(R.id.audioAutoButton);
+        audioPlusButton = findViewById(R.id.audioPlusButton);
         musicSeekBar = findViewById(R.id.musicSeekBar);
     }
 
@@ -249,6 +259,9 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             showGreen();
         });
         musicPlayButton.setOnClickListener(v -> toggleMusic());
+        audioMinusButton.setOnClickListener(v -> adjustMusicStart(-100));
+        audioAutoButton.setOnClickListener(v -> applyDetectedMusicStart());
+        audioPlusButton.setOnClickListener(v -> adjustMusicStart(100));
         recordButton.setOnClickListener(v -> {
             if (!sessionActive) startSession();
             else if (activeRecording != null) pausePlan();
@@ -256,6 +269,9 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         });
         recordButton.setText("CAMÉRA…");
         recordButton.setEnabled(false);
+        audioMinusButton.setEnabled(false);
+        audioAutoButton.setEnabled(false);
+        audioPlusButton.setEnabled(false);
         finishButton.setOnClickListener(v -> finishSession());
         downloadButton.setOnClickListener(v -> downloadVideo());
         flipCameraButton.setOnClickListener(v -> {
@@ -288,7 +304,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             }
             @Override public void onStartTrackingTouch(SeekBar bar) { }
             @Override public void onStopTrackingTouch(SeekBar bar) {
-                clipStatus.setText("Départ musique · " + format(bar.getProgress()));
+                clipStatus.setText("DÉPART MANUEL · " + formatPrecise(bar.getProgress()));
             }
         });
     }
@@ -329,8 +345,11 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         videoCapture = VideoCapture.withOutput(recorder);
         CameraSelector cameraSelector = new CameraSelector.Builder()
                 .requireLensFacing(lensFacing).build();
+        Size analysisSize = horizontalFormat
+                ? (quality == 1080 ? new Size(1280, 720) : new Size(960, 540))
+                : (quality == 1080 ? new Size(720, 1280) : new Size(540, 960));
         ImageAnalysis analysis = new ImageAnalysis.Builder()
-                .setTargetResolution(quality == 1080 ? new Size(720, 1280) : new Size(540, 960))
+                .setTargetResolution(analysisSize)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build();
@@ -451,13 +470,29 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
                         this, source, destination, Math.max(1L, durationMs) * 1000L);
                 boolean generated = "file".equals(prepared.getScheme())
                         && destination.getAbsolutePath().equals(prepared.getPath());
+                int detected = 0;
+                try {
+                    detected = AudioStartDetector.detectStartMs(
+                            this, prepared, Math.max(1, durationMs));
+                } catch (Exception ignored) {
+                    detected = 0;
+                }
+                int finalDetected = Math.max(0, Math.min(durationMs - 1, detected));
                 runOnUiThread(() -> {
                     preparedMusicUri = prepared;
                     preparedAudioFile = generated ? destination : null;
                     if (!generated && destination.exists()) destination.delete();
                     audioPreparing = false;
-                    clipStatus.setText("Musique prête · MICRO COUPÉ · audio importé uniquement");
+                    detectedAudioStartMs = finalDetected;
+                    musicSeekBar.setProgress(finalDetected);
+                    updateMusicPosition(finalDetected);
+                    audioMinusButton.setEnabled(true);
+                    audioAutoButton.setEnabled(true);
+                    audioPlusButton.setEnabled(true);
                     updateStartButton();
+                    clipStatus.setText("DÉBUT DÉTECTÉ · "
+                            + formatPrecise(finalDetected)
+                            + " · ajuste si besoin");
                 });
             } catch (Exception error) {
                 if (destination.exists()) destination.delete();
@@ -497,8 +532,8 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         sessionActive = true;
         try {
             realtimeRecorder = new RealtimeClipRecorder(this,
-                    quality == 1080 ? 1080 : 720,
-                    quality == 1080 ? 1920 : 1280,
+                    CaptureFormat.videoWidth(horizontalFormat, quality),
+                    CaptureFormat.videoHeight(horizontalFormat, quality),
                     THRESHOLD, SOFTNESS);
         } catch (Exception error) {
             realtimeRecorder = null;
@@ -790,6 +825,25 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         });
     }
 
+    private void adjustMusicStart(int deltaMs) {
+        if (!musicPrepared || musicPlayer == null || sessionActive) return;
+        int max = Math.max(0, musicPlayer.getDuration() - 1);
+        int next = Math.max(0, Math.min(max,
+                musicSeekBar.getProgress() + deltaMs));
+        musicSeekBar.setProgress(next);
+        try { musicPlayer.seekTo(next); } catch (Exception ignored) { }
+        clipStatus.setText("DÉPART AJUSTÉ · " + formatPrecise(next));
+    }
+
+    private void applyDetectedMusicStart() {
+        if (!musicPrepared || musicPlayer == null || sessionActive) return;
+        int max = Math.max(0, musicPlayer.getDuration() - 1);
+        int next = Math.max(0, Math.min(max, detectedAudioStartMs));
+        musicSeekBar.setProgress(next);
+        try { musicPlayer.seekTo(next); } catch (Exception ignored) { }
+        clipStatus.setText("DÉBUT AUTO · " + formatPrecise(next));
+    }
+
     private void toggleMusic() {
         if (!musicPrepared || musicPlayer == null || sessionActive) return;
         try {
@@ -930,6 +984,9 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         importAudioButton.setEnabled(false);
         downloadsMusicButton.setEnabled(false);
         musicSeekBar.setEnabled(false);
+        audioMinusButton.setEnabled(false);
+        audioAutoButton.setEnabled(false);
+        audioPlusButton.setEnabled(false);
         flipCameraButton.setEnabled(false);
         qualityButton.setEnabled(false);
     }
@@ -942,6 +999,11 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         downloadsMusicButton.setEnabled(enabled);
         musicSeekBar.setEnabled(enabled && musicPrepared);
         musicPlayButton.setEnabled(enabled && musicPrepared);
+        boolean audioReady = enabled && musicPrepared
+                && preparedMusicUri != null && !audioPreparing;
+        audioMinusButton.setEnabled(audioReady);
+        audioAutoButton.setEnabled(audioReady);
+        audioPlusButton.setEnabled(audioReady);
         flipCameraButton.setEnabled(enabled);
         qualityButton.setEnabled(enabled);
     }
@@ -1031,6 +1093,15 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
     private static String format(long ms) {
         long seconds = Math.max(0L, ms / 1000L);
         return String.format(Locale.FRANCE, "%02d:%02d", seconds / 60L, seconds % 60L);
+    }
+
+    private static String formatPrecise(long ms) {
+        long safe = Math.max(0L, ms);
+        long minutes = safe / 60_000L;
+        long seconds = (safe / 1000L) % 60L;
+        long tenths = (safe % 1000L) / 100L;
+        return String.format(Locale.FRANCE, "%02d:%02d.%d",
+                minutes, seconds, tenths);
     }
 
     @Override
