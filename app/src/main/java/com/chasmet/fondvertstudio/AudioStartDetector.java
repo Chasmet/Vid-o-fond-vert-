@@ -154,7 +154,7 @@ final class AudioStartDetector {
         }
     }
 
-    private static double calculateRms(ByteBuffer buffer, int pcmEncoding) {
+    static double calculateRms(ByteBuffer buffer, int pcmEncoding) {
         if (buffer == null || !buffer.hasRemaining()) return 0d;
 
         double sum = 0d;

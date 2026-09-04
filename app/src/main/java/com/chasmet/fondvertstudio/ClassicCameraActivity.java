@@ -52,6 +52,13 @@ import java.util.concurrent.Executors;
  * - seule la musique importée est intégrée au MP4 final.
  */
 public final class ClassicCameraActivity extends AppCompatActivity {
+    private enum CaptureState {
+        IDLE,
+        RECORDING,
+        INTERRUPTED,
+        FINALIZING
+    }
+
     private PreviewView previewView;
     private MaterialButton recordButton;
     private MaterialButton flipButton;
@@ -74,6 +81,9 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     private long recordingStartedAt;
     private long recordingDurationMs;
     private boolean cameraReady;
+    private CaptureState captureState = CaptureState.IDLE;
+    private boolean stopRequested;
+    private boolean interruptedByLifecycle;
 
     private Uri musicUri;
     private Uri preparedMusicUri;
@@ -105,9 +115,9 @@ public final class ClassicCameraActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        CaptureFormat.applyRequestedOrientation(this, getIntent());
         super.onCreate(savedInstanceState);
         horizontalFormat = CaptureFormat.isHorizontal(getIntent());
-        CaptureFormat.applyRequestedOrientation(this, getIntent());
         setContentView(R.layout.activity_classic_camera);
 
         previewView = findViewById(R.id.classicPreview);
@@ -227,8 +237,12 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                         .setQualitySelector(selector)
                         .build();
                 videoCapture = VideoCapture.withOutput(recorder);
+                int targetRotation = CaptureFormat.surfaceRotation(this);
+                videoCapture.setTargetRotation(targetRotation);
 
-                Preview preview = new Preview.Builder().build();
+                Preview preview = new Preview.Builder()
+                        .setTargetRotation(targetRotation)
+                        .build();
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
                 CameraSelector cameraSelector = new CameraSelector.Builder()
@@ -365,6 +379,10 @@ public final class ClassicCameraActivity extends AppCompatActivity {
             return;
         }
 
+        interruptedByLifecycle = false;
+        stopRequested = false;
+        captureState = CaptureState.IDLE;
+
         File directory = getExternalFilesDir(Environment.DIRECTORY_MOVIES);
         if (directory == null) directory = getCacheDir();
         File temporary = new File(directory,
@@ -380,6 +398,8 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                     ContextCompat.getMainExecutor(this),
                     event -> {
                         if (event instanceof VideoRecordEvent.Start) {
+                            captureState = CaptureState.RECORDING;
+                            stopRequested = false;
                             recordingStartedAt = SystemClock.elapsedRealtime();
                             recordingDurationMs = 0L;
                             timerView.setVisibility(View.VISIBLE);
@@ -391,6 +411,8 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                             VideoRecordEvent.Finalize finalize =
                                     (VideoRecordEvent.Finalize) event;
                             activeRecording = null;
+                            captureState = CaptureState.FINALIZING;
+                            stopRequested = false;
                             recordingDurationMs = Math.max(1L,
                                     readVideoDuration(temporary));
                             pauseMusic();
@@ -411,6 +433,8 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                     });
         } catch (Exception error) {
             activeRecording = null;
+            captureState = CaptureState.IDLE;
+            stopRequested = false;
             pauseMusic();
             restoreIdleControls();
             Toast.makeText(this,
@@ -420,9 +444,13 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     }
 
     private void stopRecording() {
-        if (activeRecording == null) return;
+        if (activeRecording == null || stopRequested) return;
+        stopRequested = true;
+        captureState = interruptedByLifecycle
+                ? CaptureState.INTERRUPTED : CaptureState.FINALIZING;
         recordButton.setEnabled(false);
-        recordButton.setText("FINALISATION…");
+        recordButton.setText(interruptedByLifecycle
+                ? "INTERRUPTION · SAUVEGARDE…" : "FINALISATION…");
         pauseMusic();
         activeRecording.stop();
     }
@@ -475,6 +503,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                 boolean finalAudioOk = audioOk;
                 Exception finalError = firstError;
                 runOnUiThread(() -> {
+                    captureState = CaptureState.IDLE;
                     restoreIdleControls();
                     if (finalAudioOk) {
                         Snackbar.make(recordButton,
@@ -499,9 +528,14 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                                 "La caméra a signalé une anomalie mais la vidéo a été récupérée",
                                 Toast.LENGTH_SHORT).show();
                     }
+                    if (interruptedByLifecycle) {
+                        audioStatus.setText(
+                                "ENREGISTREMENT INTERROMPU · vidéo finalisée et sauvegardée");
+                    }
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
+                    captureState = CaptureState.IDLE;
                     restoreIdleControls();
                     Toast.makeText(this,
                             "Vidéo créée mais copie galerie impossible : " + error.getMessage(),
@@ -524,6 +558,8 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     }
 
     private void restoreIdleControls() {
+        stopRequested = false;
+        if (captureState != CaptureState.INTERRUPTED) captureState = CaptureState.IDLE;
         importAudioButton.setEnabled(true);
         musicPlayButton.setEnabled(musicPrepared);
         musicSeekBar.setEnabled(musicPrepared);
@@ -677,8 +713,22 @@ public final class ClassicCameraActivity extends AppCompatActivity {
 
     @Override
     protected void onPause() {
-        if (activeRecording == null) pauseMusic();
+        if (activeRecording != null && !stopRequested) {
+            interruptedByLifecycle = true;
+            captureState = CaptureState.INTERRUPTED;
+            stopRecording();
+        } else {
+            pauseMusic();
+        }
         super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (captureState == CaptureState.INTERRUPTED) {
+            audioStatus.setText("INTERRUPTION DÉTECTÉE · finalisation sécurisée en cours");
+        }
     }
 
     @Override
@@ -690,12 +740,11 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                 activeRecording.stop();
             } catch (Exception ignored) {
             }
-            activeRecording = null;
         }
         if (cameraProvider != null) cameraProvider.unbindAll();
         releaseMusic();
         deletePreparedAudio();
-        ioExecutor.shutdownNow();
+        ioExecutor.shutdown();
         super.onDestroy();
     }
 }

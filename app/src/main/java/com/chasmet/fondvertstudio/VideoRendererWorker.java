@@ -18,10 +18,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Assemble les prises caméra indépendantes de la timeline en un seul MP4.
- * Le fichier reste dans le cache : seule l'Activity peut ensuite le sauvegarder dans la galerie.
+ * Deuxième passe de rendu Fond vert. Elle ne s'exécute que si le rendu temps réel échoue
+ * ou lorsqu'un projet sauvegardé est repris après la fermeture de l'application.
  */
-public final class ClipTimelineExportWorker extends Worker {
+public final class VideoRendererWorker extends Worker {
     public static final String KEY_SOURCE_TIMELINE_PATH = "source_timeline_path";
     public static final String KEY_TRANSFORM_PATH = "transform_path";
     public static final String KEY_EXTERNAL_AUDIO_URI = "external_audio_uri";
@@ -39,8 +39,8 @@ public final class ClipTimelineExportWorker extends Worker {
 
     private static final int SOURCE_BATCH_SIZE = 8;
 
-    public ClipTimelineExportWorker(@NonNull Context appContext,
-                                    @NonNull WorkerParameters workerParams) {
+    public VideoRendererWorker(@NonNull Context appContext,
+                               @NonNull WorkerParameters workerParams) {
         super(appContext, workerParams);
     }
 
@@ -196,10 +196,6 @@ public final class ClipTimelineExportWorker extends Worker {
             if (!keepFinal && finalVideo.exists()) finalVideo.delete();
             if (transformFile != null && transformFile.exists()) transformFile.delete();
             if (sourceTimelineFile.exists()) sourceTimelineFile.delete();
-            for (ClipSourceTimeline.Segment segment : sourceTimeline.segments()) {
-                File source = new File(segment.sourcePath);
-                if (source.exists()) source.delete();
-            }
         }
     }
 

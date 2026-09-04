@@ -9,6 +9,7 @@ import android.graphics.Color;
 import android.media.MediaMetadataRetriever;
 import android.media.MediaPlayer;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
@@ -41,6 +42,10 @@ import androidx.camera.video.Recording;
 import androidx.camera.video.VideoCapture;
 import androidx.camera.video.VideoRecordEvent;
 import androidx.core.content.ContextCompat;
+import androidx.work.Data;
+import androidx.work.OneTimeWorkRequest;
+import androidx.work.WorkInfo;
+import androidx.work.WorkManager;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.snackbar.Snackbar;
@@ -52,10 +57,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Clip Musique instantané : le rendu détouré est calculé pendant la prise.
- * La fin du montage ne fait plus de segmentation frame par frame.
+ * Caméra Fond vert : rendu temps réel prioritaire, projet récupérable et deuxième passe
+ * de rendu sécurisée avant tout recours à la vidéo caméra brute.
  */
-public final class ClipTimelineInstantActivity extends AppCompatActivity {
+public final class GreenScreenCameraActivity extends AppCompatActivity {
     private final BackgroundSpec backgroundSpec = new BackgroundSpec();
     private final ClipSourceTimeline sourceTimeline = new ClipSourceTimeline();
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -135,6 +140,16 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
     private boolean cameraReady;
     private boolean horizontalFormat;
+    private ProjectRepository projectRepository;
+    private boolean restoredProject;
+    private boolean forceOfflineRender;
+    private boolean lifecycleInterrupted;
+    private boolean activityDestroyed;
+    private boolean projectSaveWarningShown;
+    private String readyProjectStatus = ProjectRepository.STATUS_READY_EFFECT;
+    private String rendererMessage = "";
+    private boolean readyAudioApplied = true;
+    private int pendingRestoredAudioStartMs = -1;
 
     private static final float THRESHOLD = 0.52f;
     private static final float SOFTNESS = 0.040f;
@@ -160,10 +175,18 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle state) {
-        super.onCreate(state);
-        horizontalFormat = CaptureFormat.isHorizontal(getIntent());
         CaptureFormat.applyRequestedOrientation(this, getIntent());
+        super.onCreate(state);
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            Toast.makeText(this,
+                    "Fond vert nécessite Android 6 ou supérieur. Le mode Classique reste disponible.",
+                    Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+        horizontalFormat = CaptureFormat.isHorizontal(getIntent());
         setContentView(R.layout.activity_clip_timeline);
+        projectRepository = new ProjectRepository(this);
         bindViews();
         registerPickers();
         setupControls();
@@ -171,7 +194,10 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         showGreen();
         segmenter = new SegmentationEngine(this);
         segmenter.setEdgeSettings(THRESHOLD, SOFTNESS);
-        requestCamera();
+        if (getIntent().getBooleanExtra(ProjectRepository.EXTRA_RESUME_PROJECT, false)) {
+            restoredProject = restoreProject();
+        }
+        if (renderedClipFile == null) requestCamera();
     }
 
     private void bindViews() {
@@ -221,6 +247,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             currentDecorLabel = "Image · " + displayName(uri);
             decorStatus.setText(currentDecorLabel);
             showImage(uri);
+            checkpointProject();
         });
         videoPicker = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
             if (uri == null || !canChangeDecor()) return;
@@ -229,6 +256,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             currentDecorLabel = "Vidéo · " + displayName(uri);
             decorStatus.setText(currentDecorLabel);
             showVideo(uri);
+            checkpointProject();
         });
         cameraPermission = registerForActivityResult(
                 new ActivityResultContracts.RequestPermission(), granted -> {
@@ -240,10 +268,10 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
     private void setupControls() {
         findViewById(R.id.backButton).setOnClickListener(v -> finish());
         importAudioButton.setOnClickListener(v -> {
-            if (!sessionActive && renderedClipFile == null) audioPicker.launch(new String[]{"audio/*"});
+            if (canChangeMusic()) audioPicker.launch(new String[]{"audio/*"});
         });
         downloadsMusicButton.setOnClickListener(v -> {
-            if (!sessionActive && renderedClipFile == null) audioPicker.launch(new String[]{"audio/*"});
+            if (canChangeMusic()) audioPicker.launch(new String[]{"audio/*"});
         });
         importImageButton.setOnClickListener(v -> {
             if (canChangeDecor()) imagePicker.launch(new String[]{"image/*"});
@@ -257,6 +285,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             currentDecorLabel = "Fond vert";
             decorStatus.setText(currentDecorLabel);
             showGreen();
+            checkpointProject();
         });
         musicPlayButton.setOnClickListener(v -> toggleMusic());
         audioMinusButton.setOnClickListener(v -> adjustMusicStart(-100));
@@ -264,7 +293,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         audioPlusButton.setOnClickListener(v -> adjustMusicStart(100));
         recordButton.setOnClickListener(v -> {
             if (!sessionActive) startSession();
-            else if (activeRecording != null) pausePlan();
+            else if (activeRecording != null) pausePlan(false);
             else if (paused) resumePlan();
         });
         recordButton.setText("CAMÉRA…");
@@ -294,6 +323,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             int percent = Math.round(scale * 100f);
             resetSubjectButton.setText("↺ " + percent + " %");
             transformHint.setText(finished ? "Glisse · pince pour zoomer" : "SUJET · " + percent + " %");
+            if (finished) checkpointProject();
         });
         musicSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
@@ -307,6 +337,105 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
                 clipStatus.setText("DÉPART MANUEL · " + formatPrecise(bar.getProgress()));
             }
         });
+    }
+
+    private boolean restoreProject() {
+        ProjectRepository.Draft draft = projectRepository.load();
+        if (draft == null) return false;
+
+        sourceTimeline.replaceWith(draft.timeline);
+        accumulatedMs = sourceTimeline.totalDurationMs();
+        planNumber = sourceTimeline.size() + 1;
+        quality = draft.quality;
+        lensFacing = draft.lensFacing == CameraSelector.LENS_FACING_BACK
+                ? CameraSelector.LENS_FACING_BACK : CameraSelector.LENS_FACING_FRONT;
+        qualityButton.setText(quality + "p");
+        liveScale = draft.subjectScale;
+        liveCenterX = draft.subjectCenterX;
+        liveCenterY = draft.subjectCenterY;
+        subjectPreview.setSubjectTransform(liveScale, liveCenterX, liveCenterY);
+        resetSubjectButton.setText("↺ " + Math.round(liveScale * 100f) + " %");
+        applyDraftBackground(draft);
+
+        clipAudioStartMs = draft.audioStartMs;
+        detectedAudioStartMs = draft.detectedAudioStartMs;
+        pendingRestoredAudioStartMs = draft.audioStartMs;
+        readyProjectStatus = draft.status;
+        rendererMessage = draft.rendererMessage;
+        timelineStatus.setText(sourceTimeline.size() + " plan(s) · " + format(accumulatedMs));
+
+        if (draft.isReady() && !draft.renderedPath.isEmpty()) {
+            renderedClipFile = new File(draft.renderedPath);
+            readyAudioApplied = draft.audioApplied;
+            sessionActive = false;
+            paused = false;
+            showReady(ProjectRepository.STATUS_READY_EFFECT.equals(draft.status),
+                    readyAudioApplied);
+            return true;
+        }
+
+        forceOfflineRender = true;
+        sessionActive = true;
+        paused = true;
+        finishRequested = false;
+        stopRequested = false;
+        setControlsForRecording(false);
+        finishButton.setVisibility(View.VISIBLE);
+        finishButton.setEnabled(true);
+        recordButton.setVisibility(View.VISIBLE);
+        recordButton.setEnabled(false);
+        recordButton.setText("PRÉPARATION DU PROJET…");
+        clipStatus.setText("PROJET RESTAURÉ · préparation de la musique");
+
+        if (!draft.musicUri.isEmpty()) {
+            try {
+                loadMusic(Uri.parse(draft.musicUri));
+            } catch (Exception error) {
+                showRestoredMusicMissing();
+            }
+        } else {
+            showRestoredMusicMissing();
+        }
+        return true;
+    }
+
+    private void applyDraftBackground(ProjectRepository.Draft draft) {
+        BackgroundSpec.Type type;
+        try {
+            type = BackgroundSpec.Type.valueOf(draft.backgroundType);
+        } catch (IllegalArgumentException ignored) {
+            type = BackgroundSpec.Type.COLOR;
+        }
+        Uri uri = draft.backgroundUri.isEmpty() ? null : Uri.parse(draft.backgroundUri);
+        currentDecorLabel = draft.backgroundLabel;
+        decorStatus.setText(currentDecorLabel);
+        if (type == BackgroundSpec.Type.IMAGE && uri != null) {
+            backgroundSpec.setImage(uri);
+            showImage(uri);
+        } else if (type == BackgroundSpec.Type.VIDEO && uri != null) {
+            backgroundSpec.setVideo(uri);
+            showVideo(uri);
+        } else {
+            backgroundSpec.setColor(draft.backgroundColor);
+            if (draft.backgroundColor == Color.rgb(0, 255, 0)) {
+                showGreen();
+            } else {
+                previewContainer.setBackgroundColor(draft.backgroundColor);
+            }
+        }
+    }
+
+    private void showRestoredMusicMissing() {
+        musicUri = null;
+        preparedMusicUri = null;
+        audioPreparing = false;
+        sessionActive = true;
+        paused = true;
+        importAudioButton.setEnabled(true);
+        downloadsMusicButton.setEnabled(true);
+        recordButton.setEnabled(false);
+        recordButton.setText("♪ RÉIMPORTER LA MUSIQUE");
+        clipStatus.setText("PROJET SAUVÉ · musique à réimporter pour continuer");
     }
 
     private void requestCamera() {
@@ -340,9 +469,11 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             latestMaskHeight = 0;
         }
         Quality q = quality == 1080 ? Quality.FHD : Quality.HD;
+        int targetRotation = CaptureFormat.surfaceRotation(this);
         Recorder recorder = new Recorder.Builder().setQualitySelector(
                 QualitySelector.from(q, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build();
         videoCapture = VideoCapture.withOutput(recorder);
+        videoCapture.setTargetRotation(targetRotation);
         CameraSelector cameraSelector = new CameraSelector.Builder()
                 .requireLensFacing(lensFacing).build();
         Size analysisSize = horizontalFormat
@@ -350,6 +481,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
                 : (quality == 1080 ? new Size(720, 1280) : new Size(540, 960));
         ImageAnalysis analysis = new ImageAnalysis.Builder()
                 .setTargetResolution(analysisSize)
+                .setTargetRotation(targetRotation)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build();
@@ -444,6 +576,16 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         try {
             musicPlayer = new MediaPlayer();
             musicPlayer.setDataSource(this, uri);
+            musicPlayer.setOnErrorListener((player, what, extra) -> {
+                musicPrepared = false;
+                audioPreparing = false;
+                if (restoredProject && sessionActive && paused) {
+                    showRestoredMusicMissing();
+                } else {
+                    showError("Musique illisible");
+                }
+                return true;
+            });
             musicPlayer.setOnPreparedListener(player -> {
                 musicPrepared = true;
                 musicSeekBar.setMax(Math.max(1, player.getDuration()));
@@ -484,15 +626,26 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
                     if (!generated && destination.exists()) destination.delete();
                     audioPreparing = false;
                     detectedAudioStartMs = finalDetected;
-                    musicSeekBar.setProgress(finalDetected);
-                    updateMusicPosition(finalDetected);
+                    int selectedStart = pendingRestoredAudioStartMs >= 0
+                            ? Math.max(0, Math.min(durationMs - 1,
+                            pendingRestoredAudioStartMs))
+                            : finalDetected;
+                    pendingRestoredAudioStartMs = -1;
+                    clipAudioStartMs = selectedStart;
+                    musicSeekBar.setProgress(selectedStart);
+                    updateMusicPosition(selectedStart);
                     audioMinusButton.setEnabled(true);
                     audioAutoButton.setEnabled(true);
                     audioPlusButton.setEnabled(true);
                     updateStartButton();
-                    clipStatus.setText("DÉBUT DÉTECTÉ · "
-                            + formatPrecise(finalDetected)
-                            + " · ajuste si besoin");
+                    if (sessionActive && paused) {
+                        clipStatus.setText("PROJET RESTAURÉ · prêt à reprendre");
+                    } else {
+                        clipStatus.setText("DÉBUT DÉTECTÉ · "
+                                + formatPrecise(finalDetected)
+                                + " · ajuste si besoin");
+                    }
+                    checkpointProject();
                 });
             } catch (Exception error) {
                 if (destination.exists()) destination.delete();
@@ -500,6 +653,9 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
                     audioPreparing = false;
                     preparedMusicUri = null;
                     updateStartButton();
+                    if (restoredProject && sessionActive && paused) {
+                        showRestoredMusicMissing();
+                    }
                     showError("Préparation audio impossible : " + error.getMessage());
                 });
             }
@@ -523,6 +679,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             startCamera();
             return;
         }
+        projectRepository.clear(true);
         cleanupSessionFiles();
         sourceTimeline.clear();
         accumulatedMs = 0L;
@@ -530,6 +687,11 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         finishRequested = false;
         paused = false;
         sessionActive = true;
+        restoredProject = false;
+        forceOfflineRender = false;
+        lifecycleInterrupted = false;
+        readyProjectStatus = ProjectRepository.STATUS_PAUSED;
+        rendererMessage = "";
         try {
             realtimeRecorder = new RealtimeClipRecorder(this,
                     CaptureFormat.videoWidth(horizontalFormat, quality),
@@ -602,13 +764,14 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         }
     }
 
-    private void pausePlan() {
+    private void pausePlan(boolean interrupted) {
         if (activeRecording == null || stopRequested) return;
+        lifecycleInterrupted = interrupted;
         stopRequested = true;
         realtimeCaptureActive = false;
         pauseMusicAndBackground();
         recordButton.setEnabled(false);
-        recordButton.setText("Pause…");
+        recordButton.setText(interrupted ? "INTERRUPTION…" : "Pause…");
         activeRecording.stop();
     }
 
@@ -639,6 +802,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         segmentStartedAt = 0L;
         seekMusic(false);
         timelineStatus.setText(sourceTimeline.size() + " plan(s) · " + format(accumulatedMs));
+        checkpointProject();
         if (finishRequested) {
             finalizeSession();
         } else {
@@ -646,12 +810,19 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             recordButton.setEnabled(true);
             recordButton.setText("▶ REPRENDRE · " + format(accumulatedMs));
             finishButton.setVisibility(View.VISIBLE);
-            clipStatus.setText("PAUSE · change le décor puis REPRENDRE");
+            clipStatus.setText(lifecycleInterrupted
+                    ? "ENREGISTREMENT INTERROMPU · projet sauvegardé · REPRENDRE"
+                    : "PAUSE · projet sauvegardé · change le décor puis REPRENDRE");
         }
     }
 
     private void resumePlan() {
         if (!sessionActive || !paused || finishRequested) return;
+        if (!musicPrepared || preparedMusicUri == null) {
+            showRestoredMusicMissing();
+            return;
+        }
+        lifecycleInterrupted = false;
         paused = false;
         startPlan();
     }
@@ -662,6 +833,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         realtimeCaptureActive = false;
         pauseMusicAndBackground();
         finishButton.setEnabled(false);
+        checkpointProject(ProjectRepository.STATUS_FINALIZING, "");
         if (activeRecording != null) {
             stopRequested = true;
             recordButton.setEnabled(false);
@@ -684,20 +856,102 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         showBusy(94, "Finalisation instantanée…");
         RealtimeClipRecorder recorder = realtimeRecorder;
         realtimeRecorder = null;
-        if (recorder == null) {
-            buildRawFallback();
+        if (forceOfflineRender || recorder == null) {
+            if (recorder != null) recorder.close();
+            renderSecondPass(recorder == null
+                    ? "Rendu temps réel indisponible" : "Projet restauré");
             return;
         }
         recorder.finish((videoOnly, error) -> {
             if (videoOnly != null && videoOnly.isFile() && videoOnly.length() > 0L) {
                 addAudioAndExpose(videoOnly, false);
             } else {
-                buildRawFallback();
+                renderSecondPass(error == null
+                        ? "Rendu temps réel vide" : safeMessage(error));
             }
         });
     }
 
-    private void buildRawFallback() {
+    private void renderSecondPass(String firstFailure) {
+        rendererMessage = firstFailure == null ? "" : firstFailure;
+        showBusy(3, "Deuxième rendu Fond vert…");
+        final File timelineFile;
+        try {
+            timelineFile = projectRepository.createProjectFile("render_timeline", ".json");
+            sourceTimeline.write(timelineFile);
+        } catch (Exception error) {
+            buildRawFallback("Deuxième rendu impossible : " + safeMessage(error));
+            return;
+        }
+
+        Uri audio = preparedMusicUri != null ? preparedMusicUri : musicUri;
+        if (audio == null) {
+            buildRawFallback("Musique introuvable pour le deuxième rendu");
+            return;
+        }
+        Data input = new Data.Builder()
+                .putString(VideoRendererWorker.KEY_SOURCE_TIMELINE_PATH,
+                        timelineFile.getAbsolutePath())
+                .putString(VideoRendererWorker.KEY_EXTERNAL_AUDIO_URI, audio.toString())
+                .putLong(VideoRendererWorker.KEY_EXTERNAL_AUDIO_START_MS, clipAudioStartMs)
+                .putFloat(VideoRendererWorker.KEY_THRESHOLD, THRESHOLD)
+                .putFloat(VideoRendererWorker.KEY_SOFTNESS, SOFTNESS)
+                .putInt(VideoRendererWorker.KEY_QUALITY, quality)
+                .putBoolean(VideoRendererWorker.KEY_MIRROR_SOURCE,
+                        lensFacing == CameraSelector.LENS_FACING_FRONT)
+                .putFloat(VideoRendererWorker.KEY_TRANSFORM_SCALE, liveScale)
+                .putFloat(VideoRendererWorker.KEY_TRANSFORM_CENTER_X, liveCenterX)
+                .putFloat(VideoRendererWorker.KEY_TRANSFORM_CENTER_Y, liveCenterY)
+                .build();
+        OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(VideoRendererWorker.class)
+                .setInputData(input)
+                .build();
+        WorkManager manager = WorkManager.getInstance(this);
+        manager.enqueue(request);
+        manager.getWorkInfoByIdLiveData(request.getId()).observe(this, info -> {
+            if (info == null) return;
+            if (info.getState() == WorkInfo.State.RUNNING) {
+                int progress = info.getProgress().getInt(VideoRendererWorker.KEY_PROGRESS, 3);
+                processingProgress.setProgress(Math.max(3, Math.min(97, progress)));
+                processingText.setText("Deuxième rendu Fond vert · "
+                        + Math.max(3, Math.min(97, progress)) + " %");
+                return;
+            }
+            if (info.getState() == WorkInfo.State.SUCCEEDED) {
+                String path = info.getOutputData().getString(VideoRendererWorker.KEY_OUTPUT_FILE);
+                if (path == null || path.trim().isEmpty()) {
+                    buildRawFallback("Deuxième rendu terminé sans fichier");
+                } else {
+                    adoptSecondPassOutput(new File(path));
+                }
+                return;
+            }
+            if (info.getState() == WorkInfo.State.FAILED
+                    || info.getState() == WorkInfo.State.CANCELLED) {
+                String error = info.getOutputData().getString(VideoRendererWorker.KEY_ERROR);
+                buildRawFallback("Deuxième rendu échoué : "
+                        + (error == null ? "erreur inconnue" : error));
+            }
+        });
+    }
+
+    private void adoptSecondPassOutput(File rendered) {
+        ioExecutor.execute(() -> {
+            try {
+                File durable = projectRepository.adoptOutput(rendered);
+                boolean audioOk = MuxerUtils.hasAudioTrack(durable);
+                runOnUiThread(() -> exposeReadyVideo(durable, true, audioOk,
+                        rendererMessage));
+            } catch (Exception error) {
+                runOnUiThread(() -> buildRawFallback(
+                        "Deuxième rendu illisible : " + safeMessage(error)));
+            }
+        });
+    }
+
+    private void buildRawFallback(String failure) {
+        rendererMessage = failure == null ? "" : failure;
+        showBusy(97, "Récupération de la vidéo caméra…");
         ioExecutor.execute(() -> {
             File fallback = new File(getCacheDir(),
                     "clip_fallback_" + System.currentTimeMillis() + ".mp4");
@@ -713,7 +967,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             runOnUiThread(() -> {
                 if (fallback.isFile() && fallback.length() > 0L) addAudioAndExpose(fallback, true);
                 else {
-                    showError("Aucune vidéo récupérable");
+                    showError("Aucune vidéo récupérable · projet conservé");
                     showIdle();
                 }
             });
@@ -723,8 +977,16 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
     private void addAudioAndExpose(File videoOnly, boolean fallbackUsed) {
         showBusy(98, "Ajout musique…");
         ioExecutor.execute(() -> {
-            File output = new File(getCacheDir(),
-                    "clip_ready_" + System.currentTimeMillis() + ".mp4");
+            File output;
+            try {
+                output = projectRepository.createProjectFile("clip_ready", ".mp4");
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    showError("Stockage du projet inaccessible · prises conservées");
+                    showIdle();
+                });
+                return;
+            }
             boolean audioOk = false;
             Exception audioError = null;
             try {
@@ -758,14 +1020,14 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
                 return;
             }
             deleteFile(videoOnly);
-            deleteRawPlans();
             boolean finalAudioOk = audioOk;
             Exception finalAudioError = audioError;
             runOnUiThread(() -> {
-                renderedClipFile = output;
-                showReady();
+                exposeReadyVideo(output, !fallbackUsed, finalAudioOk, rendererMessage);
                 if (fallbackUsed) {
-                    Toast.makeText(this, "Mode secours vidéo utilisé", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this,
+                            "VIDÉO DE SECOURS : l'effet Fond vert n'a pas été appliqué",
+                            Toast.LENGTH_LONG).show();
                 }
                 if (!finalAudioOk) {
                     Toast.makeText(this,
@@ -776,6 +1038,17 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
                 }
             });
         });
+    }
+
+    private void exposeReadyVideo(File output, boolean effectApplied,
+                                  boolean audioOk, String detail) {
+        renderedClipFile = output;
+        readyAudioApplied = audioOk;
+        readyProjectStatus = effectApplied
+                ? ProjectRepository.STATUS_READY_EFFECT : ProjectRepository.STATUS_READY_RAW;
+        rendererMessage = detail == null ? "" : detail;
+        checkpointProject(readyProjectStatus, rendererMessage);
+        showReady(effectApplied, audioOk);
     }
 
     private File firstRawPlan() {
@@ -798,9 +1071,10 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
             try {
                 Uri saved = MediaStoreSaver.saveVideo(this, source,
                         "ClipMusique_" + System.currentTimeMillis() + ".mp4");
-                deleteFile(source);
+                projectRepository.clear(true);
                 runOnUiThread(() -> {
                     renderedClipFile = null;
+                    sourceTimeline.clear();
                     downloadButton.setVisibility(View.GONE);
                     recordButton.setVisibility(View.VISIBLE);
                     setIdleControlsEnabled(true);
@@ -893,6 +1167,59 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         return renderedClipFile == null && (!sessionActive || (paused && activeRecording == null));
     }
 
+    private boolean canChangeMusic() {
+        return renderedClipFile == null
+                && (!sessionActive || (restoredProject && paused && activeRecording == null));
+    }
+
+    private void checkpointProject() {
+        String status = renderedClipFile != null
+                ? readyProjectStatus
+                : (finishRequested ? ProjectRepository.STATUS_FINALIZING
+                : ProjectRepository.STATUS_PAUSED);
+        checkpointProject(status, rendererMessage);
+    }
+
+    private void checkpointProject(String status, String detail) {
+        if (projectRepository == null
+                || (sourceTimeline.isEmpty() && renderedClipFile == null)) {
+            return;
+        }
+        ProjectRepository.Draft draft = new ProjectRepository.Draft();
+        draft.format = horizontalFormat ? CaptureFormat.HORIZONTAL : CaptureFormat.VERTICAL;
+        draft.musicUri = musicUri == null ? "" : musicUri.toString();
+        draft.audioStartMs = Math.max(0, clipAudioStartMs);
+        draft.detectedAudioStartMs = Math.max(0, detectedAudioStartMs);
+        draft.quality = quality;
+        draft.lensFacing = lensFacing;
+        draft.backgroundType = backgroundSpec.getType().name();
+        draft.backgroundUri = backgroundSpec.getUri() == null
+                ? "" : backgroundSpec.getUri().toString();
+        draft.backgroundColor = backgroundSpec.getColor();
+        draft.backgroundLabel = currentDecorLabel;
+        draft.subjectScale = liveScale;
+        draft.subjectCenterX = liveCenterX;
+        draft.subjectCenterY = liveCenterY;
+        draft.status = status == null ? ProjectRepository.STATUS_PAUSED : status;
+        draft.renderedPath = renderedClipFile == null
+                ? "" : renderedClipFile.getAbsolutePath();
+        draft.rendererMessage = detail == null ? "" : detail;
+        draft.audioApplied = readyAudioApplied;
+        for (ClipSourceTimeline.Segment segment : sourceTimeline.segments()) {
+            draft.timeline.add(segment);
+        }
+        try {
+            projectRepository.save(draft);
+        } catch (Exception error) {
+            if (!projectSaveWarningShown && !activityDestroyed) {
+                projectSaveWarningShown = true;
+                Toast.makeText(this,
+                        "Sauvegarde automatique indisponible : " + safeMessage(error),
+                        Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
     private void showGreen() {
         try { backgroundVideo.stopPlayback(); } catch (Exception ignored) { }
         backgroundVideo.setVisibility(View.GONE);
@@ -932,7 +1259,7 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         downloadButton.setEnabled(false);
     }
 
-    private void showReady() {
+    private void showReady(boolean effectApplied, boolean audioOk) {
         processingOverlay.setVisibility(View.GONE);
         recordingTimer.setVisibility(View.GONE);
         recordButton.setVisibility(View.GONE);
@@ -940,8 +1267,14 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         downloadButton.setVisibility(View.VISIBLE);
         downloadButton.setEnabled(true);
         downloadButton.setText("↓ TÉLÉCHARGER LA VIDÉO");
-        clipStatus.setText("VIDÉO PRÊTE");
-        timelineStatus.setText(sourceTimeline.size() + " plan(s) · vidéo prête");
+        clipStatus.setText(effectApplied
+                ? (audioOk
+                ? "VIDÉO FOND VERT · effet et musique appliqués"
+                : "VIDÉO FOND VERT · effet appliqué · musique absente")
+                : (audioOk
+                ? "VIDÉO DE SECOURS — EFFET NON APPLIQUÉ"
+                : "VIDÉO DE SECOURS — SANS EFFET NI MUSIQUE"));
+        timelineStatus.setText(sourceTimeline.size() + " plan(s) · vidéo prête et sauvegardée");
     }
 
     private void showIdle() {
@@ -959,7 +1292,19 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
     }
 
     private void updateStartButton() {
-        if (sessionActive || activeRecording != null || renderedClipFile != null) return;
+        if (renderedClipFile != null || activeRecording != null) return;
+        if (sessionActive && paused) {
+            boolean ready = cameraReady && musicPrepared
+                    && preparedMusicUri != null && !audioPreparing;
+            recordButton.setEnabled(ready);
+            recordButton.setText(ready
+                    ? "▶ REPRENDRE · " + format(accumulatedMs)
+                    : (musicUri == null ? "♪ RÉIMPORTER LA MUSIQUE" : "PRÉPARATION DU PROJET…"));
+            finishButton.setVisibility(View.VISIBLE);
+            finishButton.setEnabled(!sourceTimeline.isEmpty());
+            return;
+        }
+        if (sessionActive) return;
         if (!cameraReady) {
             recordButton.setEnabled(false);
             recordButton.setText("CAMÉRA…");
@@ -1085,6 +1430,14 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
         if (file != null && file.exists()) file.delete();
     }
 
+    private static String safeMessage(Throwable error) {
+        if (error == null || error.getMessage() == null
+                || error.getMessage().trim().isEmpty()) {
+            return "erreur inconnue";
+        }
+        return error.getMessage().trim();
+    }
+
     private void showError(String message) {
         processingOverlay.setVisibility(View.GONE);
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
@@ -1106,29 +1459,39 @@ public final class ClipTimelineInstantActivity extends AppCompatActivity {
 
     @Override
     protected void onPause() {
-        if (sessionActive && activeRecording != null && !stopRequested) pausePlan();
+        if (sessionActive && activeRecording != null && !stopRequested) pausePlan(true);
         pauseMusicAndBackground();
+        checkpointProject();
         super.onPause();
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (lifecycleInterrupted && sessionActive && paused && activeRecording == null) {
+            clipStatus.setText("ENREGISTREMENT INTERROMPU · projet sauvegardé · REPRENDRE");
+            updateStartButton();
+        }
+    }
+
+    @Override
     protected void onDestroy() {
+        activityDestroyed = true;
         ui.removeCallbacks(timerTick);
         realtimeCaptureActive = false;
+        checkpointProject();
         if (activeRecording != null) {
             try { activeRecording.stop(); } catch (Exception ignored) { }
-            activeRecording = null;
         }
         if (cameraProvider != null) cameraProvider.unbindAll();
         if (realtimeRecorder != null) realtimeRecorder.close();
         cameraExecutor.shutdownNow();
-        ioExecutor.shutdownNow();
+        ioExecutor.shutdown();
         if (segmenter != null) segmenter.close();
-        subjectPreview.clearFrame();
+        if (subjectPreview != null) subjectPreview.clearFrame();
         if (currentSource != null && !currentSource.isRecycled()) currentSource.recycle();
         releaseMusic();
         deletePreparedAudio();
-        cleanupSessionFiles();
         super.onDestroy();
     }
 }

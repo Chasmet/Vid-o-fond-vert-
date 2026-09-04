@@ -60,16 +60,18 @@ public final class AppUpdateManager {
         public final String notes;
         public final String publishedAt;
         public final String downloadUrl;
+        public final String checksumUrl;
         public final long assetSize;
         public final boolean newer;
 
         UpdateInfo(String version, String title, String notes, String publishedAt,
-                   String downloadUrl, long assetSize, boolean newer) {
+                   String downloadUrl, String checksumUrl, long assetSize, boolean newer) {
             this.version = version;
             this.title = title;
             this.notes = notes;
             this.publishedAt = publishedAt;
             this.downloadUrl = downloadUrl;
+            this.checksumUrl = checksumUrl;
             this.assetSize = assetSize;
             this.newer = newer;
         }
@@ -96,6 +98,8 @@ public final class AppUpdateManager {
 
                 JSONArray assets = release.optJSONArray("assets");
                 String apkUrl = null;
+                String apkName = null;
+                String checksumUrl = null;
                 long apkSize = -1L;
                 if (assets != null) {
                     for (int i = 0; i < assets.length(); i++) {
@@ -106,8 +110,20 @@ public final class AppUpdateManager {
                         String name = asset.optString("name", "");
                         if (name.toLowerCase(Locale.ROOT).endsWith(".apk")) {
                             apkUrl = asset.optString("browser_download_url", null);
+                            apkName = name;
                             apkSize = asset.optLong("size", -1L);
                             break;
+                        }
+                    }
+                    if (apkName != null) {
+                        String expectedName = apkName + ".sha256";
+                        for (int i = 0; i < assets.length(); i++) {
+                            JSONObject asset = assets.optJSONObject(i);
+                            if (asset != null && expectedName.equalsIgnoreCase(
+                                    asset.optString("name", ""))) {
+                                checksumUrl = asset.optString("browser_download_url", null);
+                                break;
+                            }
                         }
                     }
                 }
@@ -115,11 +131,15 @@ public final class AppUpdateManager {
                 if (apkUrl == null || apkUrl.isEmpty()) {
                     throw new IllegalStateException("La dernière Release ne contient aucun APK.");
                 }
+                if (checksumUrl == null || checksumUrl.isEmpty()) {
+                    throw new IllegalStateException(
+                            "La dernière Release ne contient aucun contrôle SHA-256.");
+                }
 
                 String currentVersion = getCurrentVersionName(appContext);
                 boolean newer = compareVersions(version, currentVersion) > 0;
                 UpdateInfo info = new UpdateInfo(version, title, notes, publishedAt,
-                        apkUrl, apkSize, newer);
+                        apkUrl, checksumUrl, apkSize, newer);
                 MAIN.post(() -> callback.onSuccess(info));
             } catch (Exception error) {
                 String message = cleanError(error, "Impossible de vérifier les mises à jour.");
@@ -190,6 +210,7 @@ public final class AppUpdateManager {
                     output.flush();
                 }
 
+                ChecksumVerifier.verifySha256(apkFile, downloadText(info.checksumUrl));
                 validateDownloadedApk(appContext, apkFile);
                 MAIN.post(() -> callback.onReady(apkFile));
             } catch (Exception error) {
@@ -313,44 +334,27 @@ public final class AppUpdateManager {
         }
     }
 
-    static int compareVersions(String left, String right) {
-        String[] a = normalizeVersion(left).split("[.-]");
-        String[] b = normalizeVersion(right).split("[.-]");
-        int length = Math.max(a.length, b.length);
-        for (int i = 0; i < length; i++) {
-            int av = i < a.length ? parseLeadingNumber(a[i]) : 0;
-            int bv = i < b.length ? parseLeadingNumber(b[i]) : 0;
-            if (av != bv) {
-                return Integer.compare(av, bv);
+    private static String downloadText(String url) throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            connection = openConnection(url);
+            connection.setInstanceFollowRedirects(true);
+            int code = connection.getResponseCode();
+            if (code < 200 || code >= 300) {
+                throw new IllegalStateException("Contrôle SHA-256 indisponible, code " + code);
             }
+            return readAll(connection.getInputStream());
+        } finally {
+            if (connection != null) connection.disconnect();
         }
-        return 0;
     }
 
-    private static int parseLeadingNumber(String value) {
-        int end = 0;
-        while (end < value.length() && Character.isDigit(value.charAt(end))) {
-            end++;
-        }
-        if (end == 0) {
-            return 0;
-        }
-        try {
-            return Integer.parseInt(value.substring(0, end));
-        } catch (NumberFormatException ignored) {
-            return 0;
-        }
+    static int compareVersions(String left, String right) {
+        return VersionComparator.compare(left, right);
     }
 
     private static String normalizeVersion(String version) {
-        if (version == null) {
-            return "0";
-        }
-        String normalized = version.trim();
-        if (normalized.startsWith("v") || normalized.startsWith("V")) {
-            normalized = normalized.substring(1);
-        }
-        return normalized.isEmpty() ? "0" : normalized;
+        return VersionComparator.normalize(version);
     }
 
     private static String sanitizeVersion(String version) {
