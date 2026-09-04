@@ -17,4 +17,16 @@ public final class AudioWaveformExtractorTest {
         assertTrue(normalized[5] <= 1f);
         assertTrue(normalized[5] >= 0.99f);
     }
+
+    @Test
+    public void detectsSustainedStartAndIgnoresAnIsolatedPeak() {
+        float[] peaks = new float[100];
+        peaks[20] = 0.9f;
+        for (int index = 60; index < 66; index++) peaks[index] = 0.25f;
+
+        int detected = AudioWaveformExtractor.detectStartMs(peaks, 10_000_000L);
+
+        assertTrue(detected >= 5_900);
+        assertTrue(detected <= 6_050);
+    }
 }

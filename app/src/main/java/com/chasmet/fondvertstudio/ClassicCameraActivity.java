@@ -92,10 +92,13 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     private boolean audioPreparing;
     private int audioStartMs;
     private int detectedAudioStartMs;
+    private int audioLoadGeneration;
+    private boolean audioStartEdited;
     private boolean horizontalFormat;
 
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService audioAnalysisExecutor = Executors.newSingleThreadExecutor();
 
     private ActivityResultLauncher<String> cameraPermissionLauncher;
     private ActivityResultLauncher<String[]> audioPicker;
@@ -103,12 +106,43 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     private final Runnable timerTick = new Runnable() {
         @Override
         public void run() {
-            if (activeRecording == null) return;
+            if (activeRecording == null || stopRequested) return;
             long elapsed = SystemClock.elapsedRealtime() - recordingStartedAt;
             String value = formatDuration(elapsed);
             timerView.setText(value);
             recordButton.setText("■  ARRÊTER   " + value);
+            if (musicPrepared && musicPlayer != null) {
+                int progress = (int) Math.min(Math.max(0, musicPlayer.getDuration()),
+                        Math.max(0L, (long) audioStartMs + elapsed));
+                audioTimeline.setPlaybackPositionMs(progress);
+                updateAudioPosition(progress);
+                if (musicPlayer.getDuration() > 0
+                        && progress >= musicPlayer.getDuration() - 50) {
+                    stopRecording();
+                    return;
+                }
+            }
             uiHandler.postDelayed(this, 200L);
+        }
+    };
+
+    private final Runnable musicProgressTick = new Runnable() {
+        @Override
+        public void run() {
+            MediaPlayer player = musicPlayer;
+            if (!musicPrepared || player == null) return;
+            try {
+                if (!player.isPlaying()) {
+                    audioTimeline.setPlaybackActive(false);
+                    return;
+                }
+                int position = Math.max(0, player.getCurrentPosition());
+                audioTimeline.setPlaybackPositionMs(position);
+                updateAudioPosition(position);
+                uiHandler.postDelayed(this, 50L);
+            } catch (Exception ignored) {
+                audioTimeline.setPlaybackActive(false);
+            }
         }
     };
 
@@ -179,6 +213,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
             @Override
             public void onPositionChanged(int positionMs, boolean fromUser) {
                 audioStartMs = positionMs;
+                if (fromUser) audioStartEdited = true;
                 updateAudioPosition(positionMs);
                 if (fromUser && musicPrepared && musicPlayer != null
                         && activeRecording == null) {
@@ -189,6 +224,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
             @Override
             public void onScrubFinished(int positionMs) {
                 audioStartMs = positionMs;
+                audioStartEdited = true;
                 audioStatus.setText("DÉPART MANUEL · " + formatPrecise(positionMs));
             }
         });
@@ -259,19 +295,38 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     }
 
     private void loadMusic(Uri uri) {
+        final int generation = ++audioLoadGeneration;
         releaseMusic();
         deletePreparedAudio();
         musicUri = uri;
+        audioStartEdited = false;
+        detectedAudioStartMs = 0;
         audioName.setText(displayName(uri));
-        audioStatus.setText("PRÉPARATION AUDIO…");
+        audioStatus.setText("CHARGEMENT MUSIQUE…");
+        audioTimeline.setDurationMs(0);
+        audioTimeline.setWaveform(null);
+        audioTimeline.setDetectedStartMs(-1);
         audioPreparing = true;
         updateRecordState();
 
         try {
             musicPlayer = new MediaPlayer();
             musicPlayer.setDataSource(this, uri);
+            musicPlayer.setOnErrorListener((player, what, extra) -> {
+                if (generation != audioLoadGeneration || player != musicPlayer) return true;
+                audioPreparing = false;
+                musicPrepared = false;
+                preparedMusicUri = null;
+                audioStatus.setText("MUSIQUE ILLISIBLE");
+                audioTimeline.setDurationMs(0);
+                updateRecordState();
+                Toast.makeText(this, "Musique illisible", Toast.LENGTH_LONG).show();
+                return true;
+            });
             musicPlayer.setOnPreparedListener(player -> {
+                if (generation != audioLoadGeneration || player != musicPlayer) return;
                 musicPrepared = true;
+                preparedMusicUri = uri;
                 int duration = Math.max(1, player.getDuration());
                 audioTimeline.setDurationMs(duration);
                 audioTimeline.setPositionMs(0);
@@ -280,8 +335,22 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                 audioStartMs = 0;
                 audioTimeline.setEnabled(true);
                 musicPlayButton.setEnabled(true);
+                audioMinusButton.setEnabled(true);
+                audioPlusButton.setEnabled(true);
+                audioAutoButton.setEnabled(false);
                 updateAudioPosition(0);
-                prepareAudio(uri, duration);
+                audioStatus.setText("MUSIQUE PRÊTE · analyse rapide en arrière-plan");
+                updateRecordState();
+                prepareAudio(uri, duration, generation);
+            });
+            musicPlayer.setOnCompletionListener(player -> {
+                if (generation != audioLoadGeneration || player != musicPlayer) return;
+                uiHandler.removeCallbacks(musicProgressTick);
+                audioTimeline.setPlaybackPositionMs(Math.max(0, player.getDuration()));
+                audioTimeline.setPlaybackActive(false);
+                musicPlayButton.setText("▶ ÉCOUTER");
+                audioStatus.setText("FIN DE LA MUSIQUE · arrêt automatique");
+                if (activeRecording != null && !stopRequested) stopRecording();
             });
             musicPlayer.prepareAsync();
         } catch (Exception error) {
@@ -292,79 +361,61 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         }
     }
 
-    private void prepareAudio(Uri source, int durationMs) {
-        File dir = new File(getCacheDir(), "prepared_audio");
-        if (!dir.exists()) dir.mkdirs();
-        File destination = new File(dir,
-                "classic_audio_" + System.currentTimeMillis() + ".m4a");
-
-        ioExecutor.execute(() -> {
+    private void prepareAudio(Uri source, int durationMs, int generation) {
+        audioAnalysisExecutor.execute(() -> {
             try {
-                Uri prepared = MuxerUtils.prepareAudioForFastMux(
-                        this, source, destination,
-                        Math.max(1L, durationMs) * 1000L);
-                boolean generated = "file".equals(prepared.getScheme())
-                        && destination.getAbsolutePath().equals(prepared.getPath());
-                int detected = 0;
-                try {
-                    detected = AudioStartDetector.detectStartMs(
-                            this, prepared, Math.max(1, durationMs));
-                } catch (Exception ignored) {
-                    detected = 0;
-                }
-                int finalDetected = Math.max(0, Math.min(durationMs - 1, detected));
-                float[] waveform;
-                try {
-                    waveform = AudioWaveformExtractor.extract(
-                            this, prepared, durationMs, 1800);
-                } catch (Exception ignored) {
-                    waveform = new float[0];
-                }
-                float[] finalWaveform = waveform;
+                AudioWaveformExtractor.Analysis analysis =
+                        AudioWaveformExtractor.analyze(this, source, durationMs, 1500);
+                int finalDetected = Math.max(0,
+                        Math.min(durationMs - 1, analysis.detectedStartMs));
                 runOnUiThread(() -> {
-                    preparedMusicUri = prepared;
-                    preparedAudioFile = generated ? destination : null;
-                    if (!generated && destination.exists()) destination.delete();
+                    if (generation != audioLoadGeneration || !source.equals(musicUri)) return;
                     audioPreparing = false;
                     detectedAudioStartMs = finalDetected;
-                    audioStartMs = finalDetected;
-                    audioTimeline.setWaveform(finalWaveform);
+                    audioTimeline.setWaveform(analysis.waveform);
                     audioTimeline.setDetectedStartMs(finalDetected);
-                    audioTimeline.setPositionMs(finalDetected);
-                    audioMinusButton.setEnabled(true);
-                    audioAutoButton.setEnabled(true);
-                    audioPlusButton.setEnabled(true);
-                    audioStatus.setText("DÉBUT DÉTECTÉ · "
-                            + formatPrecise(finalDetected)
-                            + " · ajuste si besoin");
+                    if (!audioStartEdited && captureState == CaptureState.IDLE
+                            && activeRecording == null) {
+                        audioStartMs = finalDetected;
+                        audioTimeline.setPositionMs(finalDetected);
+                    }
+                    audioAutoButton.setEnabled(activeRecording == null
+                            && captureState == CaptureState.IDLE);
+                    if (activeRecording == null && captureState == CaptureState.IDLE) {
+                        audioStatus.setText("DÉBUT DÉTECTÉ · "
+                                + formatPrecise(finalDetected)
+                                + " · musique prête");
+                    }
                     updateRecordState();
                 });
             } catch (Exception error) {
-                if (destination.exists()) destination.delete();
                 runOnUiThread(() -> {
+                    if (generation != audioLoadGeneration) return;
                     audioPreparing = false;
-                    preparedMusicUri = null;
-                    audioStatus.setText("AUDIO NON PRÊT");
+                    if (captureState == CaptureState.IDLE) {
+                        audioStatus.setText("MUSIQUE PRÊTE · forme d'onde indisponible");
+                    }
                     updateRecordState();
-                    Toast.makeText(this,
-                            "Préparation audio impossible : " + error.getMessage(),
-                            Toast.LENGTH_LONG).show();
                 });
             }
         });
     }
 
     private void updateRecordState() {
-        if (activeRecording != null) return;
+        if (activeRecording != null || captureState == CaptureState.FINALIZING
+                || captureState == CaptureState.INTERRUPTED) return;
         if (!cameraReady) {
             recordButton.setEnabled(false);
             recordButton.setText("CAMÉRA…");
             return;
         }
-        recordButton.setEnabled(!audioPreparing);
         if (preparedMusicUri == null) {
-            recordButton.setText("♪  IMPORTER UNE MUSIQUE");
+            boolean loading = audioPreparing && musicUri != null;
+            recordButton.setEnabled(!loading);
+            recordButton.setText(loading ? "CHARGEMENT MUSIQUE…"
+                    : "♪  IMPORTER UNE MUSIQUE");
         } else {
+            recordButton.setEnabled(true);
             recordButton.setText("●  FILMER");
         }
     }
@@ -382,12 +433,6 @@ public final class ClassicCameraActivity extends AppCompatActivity {
             audioPicker.launch(new String[]{"audio/*"});
             return;
         }
-        if (audioPreparing) {
-            Toast.makeText(this, "Préparation de la musique en cours",
-                    Toast.LENGTH_SHORT).show();
-            return;
-        }
-
         interruptedByLifecycle = false;
         stopRequested = false;
         captureState = CaptureState.IDLE;
@@ -573,11 +618,12 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         musicPlayButton.setEnabled(musicPrepared);
         audioTimeline.setEnabled(musicPrepared);
         boolean audioReady = musicPrepared && preparedMusicUri != null && !audioPreparing;
-        audioMinusButton.setEnabled(audioReady);
+        audioMinusButton.setEnabled(musicPrepared && preparedMusicUri != null);
         audioAutoButton.setEnabled(audioReady);
-        audioPlusButton.setEnabled(audioReady);
+        audioPlusButton.setEnabled(musicPrepared && preparedMusicUri != null);
         flipButton.setEnabled(true);
         qualityButton.setEnabled(true);
+        if (musicPrepared) audioTimeline.setPositionMs(audioStartMs);
         updateRecordState();
     }
 
@@ -585,6 +631,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         if (!musicPrepared || musicPlayer == null || activeRecording != null) return;
         int max = Math.max(0, musicPlayer.getDuration() - 1);
         audioStartMs = Math.max(0, Math.min(max, audioStartMs + deltaMs));
+        audioStartEdited = true;
         audioTimeline.setPositionMs(audioStartMs);
         try { musicPlayer.seekTo(audioStartMs); } catch (Exception ignored) { }
         audioStatus.setText("DÉPART AJUSTÉ · " + formatPrecise(audioStartMs));
@@ -594,6 +641,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         if (!musicPrepared || musicPlayer == null || activeRecording != null) return;
         int max = Math.max(0, musicPlayer.getDuration() - 1);
         audioStartMs = Math.max(0, Math.min(max, detectedAudioStartMs));
+        audioStartEdited = true;
         audioTimeline.setPositionMs(audioStartMs);
         try { musicPlayer.seekTo(audioStartMs); } catch (Exception ignored) { }
         audioStatus.setText("DÉBUT AUTO · " + formatPrecise(audioStartMs));
@@ -604,11 +652,14 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         try {
             if (musicPlayer.isPlaying()) {
                 musicPlayer.pause();
+                uiHandler.removeCallbacks(musicProgressTick);
+                audioTimeline.setPlaybackActive(false);
                 musicPlayButton.setText("▶ ÉCOUTER");
             } else {
                 musicPlayer.seekTo(Math.min(audioStartMs,
                         Math.max(0, musicPlayer.getDuration() - 1)));
                 musicPlayer.start();
+                startMusicProgress();
                 musicPlayButton.setText("Ⅱ PAUSE");
             }
         } catch (Exception ignored) {
@@ -622,18 +673,27 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                     Math.max(0, musicPlayer.getDuration() - 1));
             musicPlayer.seekTo(target);
             musicPlayer.start();
+            startMusicProgress();
             musicPlayButton.setText("Ⅱ PAUSE");
         } catch (Exception ignored) {
         }
     }
 
     private void pauseMusic() {
+        uiHandler.removeCallbacks(musicProgressTick);
+        if (audioTimeline != null) audioTimeline.setPlaybackActive(false);
         if (musicPlayer == null) return;
         try {
             if (musicPlayer.isPlaying()) musicPlayer.pause();
             musicPlayButton.setText("▶ ÉCOUTER");
         } catch (Exception ignored) {
         }
+    }
+
+    private void startMusicProgress() {
+        uiHandler.removeCallbacks(musicProgressTick);
+        audioTimeline.setPlaybackActive(true);
+        uiHandler.postDelayed(musicProgressTick, 30L);
     }
 
     private void updateAudioPosition(int positionMs) {
@@ -687,6 +747,8 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     }
 
     private void releaseMusic() {
+        uiHandler.removeCallbacks(musicProgressTick);
+        if (audioTimeline != null) audioTimeline.setPlaybackActive(false);
         musicPrepared = false;
         if (musicPlayer != null) {
             try {
@@ -742,6 +804,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        audioLoadGeneration++;
         uiHandler.removeCallbacks(timerTick);
         pauseMusic();
         if (activeRecording != null) {
@@ -754,6 +817,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         releaseMusic();
         deletePreparedAudio();
         ioExecutor.shutdown();
+        audioAnalysisExecutor.shutdownNow();
         super.onDestroy();
     }
 }

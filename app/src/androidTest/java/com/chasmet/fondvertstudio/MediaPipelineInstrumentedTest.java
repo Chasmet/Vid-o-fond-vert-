@@ -14,6 +14,7 @@ import org.junit.runner.RunWith;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -33,6 +34,50 @@ public final class MediaPipelineInstrumentedTest {
             wav.delete();
             aac.delete();
         }
+    }
+
+    @Test
+    public void analyzesWaveformAndAutomaticStartInOneDecodePass() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File wav = createPcmWav(context, "waveform-analysis.wav", 16, 2_000, 800);
+        try {
+            AudioWaveformExtractor.Analysis analysis = AudioWaveformExtractor.analyze(
+                    context, Uri.fromFile(wav), 2_000L, 120);
+            assertEquals(120, analysis.waveform.length);
+            assertTrue(analysis.detectedStartMs >= 300);
+            assertTrue(analysis.detectedStartMs <= 1_100);
+            float maximum = 0f;
+            for (float peak : analysis.waveform) maximum = Math.max(maximum, peak);
+            assertTrue(maximum > 0.1f);
+        } finally {
+            wav.delete();
+        }
+    }
+
+    @Test
+    public void playbackAnimationDoesNotChangeTheSelectedAudioStart() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        AtomicInteger selectionCallbacks = new AtomicInteger();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            AudioTimelineView timeline = new AudioTimelineView(context);
+            timeline.setDurationMs(30_000);
+            timeline.setPositionMs(5_000);
+            timeline.setOnPositionChangeListener(new AudioTimelineView.OnPositionChangeListener() {
+                @Override
+                public void onPositionChanged(int positionMs, boolean fromUser) {
+                    selectionCallbacks.incrementAndGet();
+                }
+
+                @Override
+                public void onScrubFinished(int positionMs) {
+                    selectionCallbacks.incrementAndGet();
+                }
+            });
+            timeline.setPlaybackPositionMs(8_500);
+            assertEquals(8_500, timeline.getPositionMs());
+            assertTrue(timeline.isPlaybackActive());
+        });
+        assertEquals(0, selectionCallbacks.get());
     }
 
     @Test
@@ -125,6 +170,11 @@ public final class MediaPipelineInstrumentedTest {
 
     private static File createPcmWav(Context context, String name,
                                      int bits, int durationMs) throws Exception {
+        return createPcmWav(context, name, bits, durationMs, 100);
+    }
+
+    private static File createPcmWav(Context context, String name,
+                                     int bits, int durationMs, int silenceMs) throws Exception {
         int sampleRate = 8_000;
         int channels = 1;
         int bytesPerSample = bits / 8;
@@ -146,7 +196,8 @@ public final class MediaPipelineInstrumentedTest {
             output.write(new byte[]{'d', 'a', 't', 'a'});
             writeIntLe(output, dataSize);
             byte[] samples = new byte[dataSize];
-            for (int frame = sampleRate / 10; frame < frames; frame++) {
+            int silenceFrames = sampleRate * Math.max(0, silenceMs) / 1000;
+            for (int frame = silenceFrames; frame < frames; frame++) {
                 double wave = Math.sin(frame * 2d * Math.PI * 440d / sampleRate) * 0.25d;
                 long sample = Math.round(wave * ((1L << (bits - 1)) - 1L));
                 int offset = frame * bytesPerSample;

@@ -49,6 +49,7 @@ public final class AudioTimelineView extends View {
     private float downX;
     private int downPositionMs;
     private boolean dragging;
+    private boolean playbackActive;
     private VelocityTracker velocityTracker;
     private OnPositionChangeListener listener;
 
@@ -119,7 +120,27 @@ public final class AudioTimelineView extends View {
     }
 
     public void setPositionMs(int positionMs) {
+        setPlaybackActive(false);
         setPositionInternal(positionMs, false);
+    }
+
+    /**
+     * Déplace la piste pendant une écoute ou un tournage sans modifier le départ
+     * choisi par l'utilisateur dans l'Activity.
+     */
+    public void setPlaybackPositionMs(int positionMs) {
+        setPlaybackActive(true);
+        setPositionInternal(positionMs, false);
+    }
+
+    public void setPlaybackActive(boolean active) {
+        if (playbackActive == active) return;
+        playbackActive = active;
+        invalidate();
+    }
+
+    public boolean isPlaybackActive() {
+        return playbackActive;
     }
 
     public int getPositionMs() {
@@ -233,9 +254,15 @@ public final class AudioTimelineView extends View {
     }
 
     private void drawPlayhead(Canvas canvas, float centerX, float height) {
+        playheadPaint.setColor(playbackActive
+                ? Color.rgb(255, 69, 103) : Color.WHITE);
+        bubblePaint.setColor(playbackActive
+                ? Color.rgb(255, 69, 103) : Color.rgb(245, 247, 250));
+        bubbleTextPaint.setColor(playbackActive
+                ? Color.WHITE : Color.rgb(12, 15, 20));
         canvas.drawLine(centerX, dp(18f), centerX, height - dp(4f), playheadPaint);
-        String label = formatPrecise(positionMs);
-        float bubbleWidth = dp(54f);
+        String label = (playbackActive ? "▶ " : "") + formatPrecise(positionMs);
+        float bubbleWidth = dp(playbackActive ? 68f : 54f);
         rounded.set(centerX - bubbleWidth * 0.5f, dp(1f),
                 centerX + bubbleWidth * 0.5f, dp(18f));
         canvas.drawRoundRect(rounded, dp(6f), dp(6f), bubblePaint);
@@ -254,6 +281,7 @@ public final class AudioTimelineView extends View {
         scaleDetector.onTouchEvent(event);
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
+            setPlaybackActive(false);
             scroller.forceFinished(true);
             downX = event.getX();
             downPositionMs = positionMs;
@@ -317,8 +345,9 @@ public final class AudioTimelineView extends View {
         positionMs = clamped;
         invalidate();
         if (fromUser && listener != null) listener.onPositionChanged(positionMs, true);
-        setContentDescription("Départ audio " + formatPrecise(positionMs)
-                + ". Glisse horizontalement pour ajuster");
+        setContentDescription((playbackActive ? "Lecture audio " : "Départ audio ")
+                + formatPrecise(positionMs)
+                + (playbackActive ? "" : ". Glisse horizontalement pour ajuster"));
     }
 
     private float timeToX(float timeMs, float centerX) {
