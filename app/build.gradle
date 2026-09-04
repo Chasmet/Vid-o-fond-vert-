@@ -10,8 +10,8 @@ android {
         applicationId 'com.chasmet.fondvertstudio'
         minSdk 21
         targetSdk 34
-        versionCode 27
-        versionName '1.12.8'
+        versionCode 30
+        versionName '1.13.2'
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         vectorDrawables.useSupportLibrary = true
@@ -68,6 +68,13 @@ dependencies {
     implementation 'com.google.mlkit:segmentation-selfie:16.0.0-beta6'
     implementation 'androidx.work:work-runtime:2.9.1'
 
-    // Conversion audio faite dès l'import pour que la fin du montage soit quasi immédiate.
+    // Compatibilité des WAV/PCM : seule la portion réellement filmée est convertie à l'export.
     implementation 'androidx.media3:media3-transformer:1.4.1'
+
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test:core:1.6.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test:rules:1.6.1'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.6.1'
 }

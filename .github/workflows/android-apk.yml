@@ -14,9 +14,10 @@ permissions:
 
 env:
   ANDROID_KEYSTORE_PATH: /home/runner/.android/fondvert-update.keystore
-  ANDROID_KEYSTORE_PASSWORD: android
-  ANDROID_KEY_ALIAS: fondvertupdate
-  ANDROID_KEY_PASSWORD: android
+  ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+  ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+  ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+  ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
 jobs:
   keep-signing-key:
@@ -35,6 +36,10 @@ jobs:
       - name: Vérifier que la clé existe toujours
         shell: bash
         run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            mkdir -p ~/.android
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          fi
           if [ ! -f "$ANDROID_KEYSTORE_PATH" ]; then
             echo "ERREUR : la clé de signature stable n'est plus disponible."
             echo "Aucune nouvelle clé ne sera générée afin de ne pas casser les mises à jour Android."
@@ -42,8 +47,50 @@ jobs:
           fi
           echo "Clé de signature restaurée : continuité des mises à jour préservée."
 
+  android-api-tests:
+    if: github.event_name != 'schedule'
+    name: Tests Android API ${{ matrix.api-level }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [23, 28, 34]
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Préparer Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Autoriser Gradle
+        run: chmod +x gradlew
+
+      - name: Activer KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Tests instrumentés
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: ./gradlew --no-daemon connectedDebugAndroidTest
+
   build:
     if: github.event_name != 'schedule'
+    needs: android-api-tests
     name: Fond Vert Studio APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -71,14 +118,27 @@ jobs:
           path: ~/.android/fondvert-update.keystore
           key: fond-vert-studio-signing-v1
 
+      - name: Restaurer la clé depuis le Secret chiffré
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        shell: bash
+        run: |
+          mkdir -p ~/.android
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          chmod 600 "$ANDROID_KEYSTORE_PATH"
+
       - name: Préparer la signature sans jamais la remplacer
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           mkdir -p ~/.android
+          STORE_PASSWORD="${ANDROID_KEYSTORE_PASSWORD:-android}"
+          KEY_ALIAS="${ANDROID_KEY_ALIAS:-fondvertupdate}"
+          KEY_PASSWORD="${ANDROID_KEY_PASSWORD:-android}"
           if [ -f "$ANDROID_KEYSTORE_PATH" ]; then
             echo "Clé de signature stable restaurée."
+            keytool -list -keystore "$ANDROID_KEYSTORE_PATH" \
+              -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
             exit 0
           fi
 
@@ -90,9 +150,9 @@ jobs:
 
           keytool -genkeypair -v \
             -keystore "$ANDROID_KEYSTORE_PATH" \
-            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-            -alias "$ANDROID_KEY_ALIAS" \
-            -keypass "$ANDROID_KEY_PASSWORD" \
+            -storepass "$STORE_PASSWORD" \
+            -alias "$KEY_ALIAS" \
+            -keypass "$KEY_PASSWORD" \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
@@ -108,7 +168,7 @@ jobs:
           fi
 
       - name: Compiler et tester les APK
-        run: ./gradlew --no-daemon clean assembleDebug assembleRelease lintDebug lintRelease
+        run: ./gradlew --no-daemon clean testDebugUnitTest assembleDebug assembleRelease lintDebug lintRelease
 
       - name: Lire la version
         id: version
