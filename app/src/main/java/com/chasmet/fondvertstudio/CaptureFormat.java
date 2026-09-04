@@ -47,6 +47,26 @@ final class CaptureFormat {
         return display == null ? Surface.ROTATION_0 : display.getRotation();
     }
 
+    /**
+     * Évite qu'une valeur de rotation encore héritée de l'écran précédent soit transmise à
+     * CameraX pendant le changement portrait/paysage. C'était visible sur certains appareils
+     * sous la forme d'une caméra couchée dans un fichier horizontal entouré de bandes noires.
+     */
+    static int cameraTargetRotation(Activity activity, boolean horizontal) {
+        return normalizeCameraRotation(surfaceRotation(activity), horizontal);
+    }
+
+    static int normalizeCameraRotation(int displayRotation, boolean horizontal) {
+        if (horizontal) {
+            return displayRotation == Surface.ROTATION_90
+                    || displayRotation == Surface.ROTATION_270
+                    ? displayRotation : Surface.ROTATION_90;
+        }
+        return displayRotation == Surface.ROTATION_0
+                || displayRotation == Surface.ROTATION_180
+                ? displayRotation : Surface.ROTATION_0;
+    }
+
     static int videoWidth(boolean horizontal, int quality) {
         if (quality >= 1080) return horizontal ? 1920 : 1080;
         return horizontal ? 1280 : 720;

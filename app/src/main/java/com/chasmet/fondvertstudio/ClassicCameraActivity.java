@@ -14,7 +14,6 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.OpenableColumns;
 import android.view.View;
-import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -71,7 +70,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     private TextView timerView;
     private TextView audioName;
     private TextView audioStatus;
-    private SeekBar musicSeekBar;
+    private AudioTimelineView audioTimeline;
 
     private ProcessCameraProvider cameraProvider;
     private VideoCapture<Recorder> videoCapture;
@@ -132,7 +131,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         timerView = findViewById(R.id.classicTimer);
         audioName = findViewById(R.id.classicAudioName);
         audioStatus = findViewById(R.id.classicAudioStatus);
-        musicSeekBar = findViewById(R.id.classicMusicSeekBar);
+        audioTimeline = findViewById(R.id.classicAudioTimeline);
 
         cameraPermissionLauncher = registerForActivityResult(
                 new ActivityResultContracts.RequestPermission(),
@@ -175,37 +174,34 @@ public final class ClassicCameraActivity extends AppCompatActivity {
             qualityButton.setText(quality + "p");
             startCamera();
         });
-        musicSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        audioTimeline.setOnPositionChangeListener(
+                new AudioTimelineView.OnPositionChangeListener() {
             @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                audioStartMs = progress;
-                updateAudioPosition(progress);
+            public void onPositionChanged(int positionMs, boolean fromUser) {
+                audioStartMs = positionMs;
+                updateAudioPosition(positionMs);
                 if (fromUser && musicPrepared && musicPlayer != null
                         && activeRecording == null) {
-                    try {
-                        musicPlayer.seekTo(progress);
-                    } catch (Exception ignored) {
-                    }
+                    try { musicPlayer.seekTo(positionMs); } catch (Exception ignored) { }
                 }
             }
 
-            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
-
             @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {
-                audioStatus.setText("DÉPART MANUEL · " + formatPrecise(audioStartMs));
+            public void onScrubFinished(int positionMs) {
+                audioStartMs = positionMs;
+                audioStatus.setText("DÉPART MANUEL · " + formatPrecise(positionMs));
             }
         });
 
         recordButton.setEnabled(false);
         musicPlayButton.setEnabled(false);
-        musicSeekBar.setEnabled(false);
+        audioTimeline.setEnabled(false);
         audioMinusButton.setEnabled(false);
         audioAutoButton.setEnabled(false);
         audioPlusButton.setEnabled(false);
         audioStatus.setText(CaptureFormat.label(horizontalFormat)
                 + " · MICRO COUPÉ · IMPORTE UNE MUSIQUE");
-        requestCamera();
+        previewView.post(this::requestCamera);
     }
 
     private void requestCamera() {
@@ -237,7 +233,8 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                         .setQualitySelector(selector)
                         .build();
                 videoCapture = VideoCapture.withOutput(recorder);
-                int targetRotation = CaptureFormat.surfaceRotation(this);
+                int targetRotation = CaptureFormat.cameraTargetRotation(
+                        this, horizontalFormat);
                 videoCapture.setTargetRotation(targetRotation);
 
                 Preview preview = new Preview.Builder()
@@ -276,10 +273,12 @@ public final class ClassicCameraActivity extends AppCompatActivity {
             musicPlayer.setOnPreparedListener(player -> {
                 musicPrepared = true;
                 int duration = Math.max(1, player.getDuration());
-                musicSeekBar.setMax(duration);
-                musicSeekBar.setProgress(0);
+                audioTimeline.setDurationMs(duration);
+                audioTimeline.setPositionMs(0);
+                audioTimeline.setDetectedStartMs(-1);
+                audioTimeline.setWaveform(null);
                 audioStartMs = 0;
-                musicSeekBar.setEnabled(true);
+                audioTimeline.setEnabled(true);
                 musicPlayButton.setEnabled(true);
                 updateAudioPosition(0);
                 prepareAudio(uri, duration);
@@ -314,6 +313,14 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                     detected = 0;
                 }
                 int finalDetected = Math.max(0, Math.min(durationMs - 1, detected));
+                float[] waveform;
+                try {
+                    waveform = AudioWaveformExtractor.extract(
+                            this, prepared, durationMs, 1800);
+                } catch (Exception ignored) {
+                    waveform = new float[0];
+                }
+                float[] finalWaveform = waveform;
                 runOnUiThread(() -> {
                     preparedMusicUri = prepared;
                     preparedAudioFile = generated ? destination : null;
@@ -321,7 +328,9 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                     audioPreparing = false;
                     detectedAudioStartMs = finalDetected;
                     audioStartMs = finalDetected;
-                    musicSeekBar.setProgress(finalDetected);
+                    audioTimeline.setWaveform(finalWaveform);
+                    audioTimeline.setDetectedStartMs(finalDetected);
+                    audioTimeline.setPositionMs(finalDetected);
                     audioMinusButton.setEnabled(true);
                     audioAutoButton.setEnabled(true);
                     audioPlusButton.setEnabled(true);
@@ -548,7 +557,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     private void setRecordingControls(boolean enabled) {
         importAudioButton.setEnabled(enabled);
         musicPlayButton.setEnabled(enabled && musicPrepared);
-        musicSeekBar.setEnabled(enabled && musicPrepared);
+        audioTimeline.setEnabled(enabled && musicPrepared);
         audioMinusButton.setEnabled(enabled && musicPrepared && preparedMusicUri != null);
         audioAutoButton.setEnabled(enabled && musicPrepared && preparedMusicUri != null);
         audioPlusButton.setEnabled(enabled && musicPrepared && preparedMusicUri != null);
@@ -562,7 +571,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         if (captureState != CaptureState.INTERRUPTED) captureState = CaptureState.IDLE;
         importAudioButton.setEnabled(true);
         musicPlayButton.setEnabled(musicPrepared);
-        musicSeekBar.setEnabled(musicPrepared);
+        audioTimeline.setEnabled(musicPrepared);
         boolean audioReady = musicPrepared && preparedMusicUri != null && !audioPreparing;
         audioMinusButton.setEnabled(audioReady);
         audioAutoButton.setEnabled(audioReady);
@@ -576,7 +585,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         if (!musicPrepared || musicPlayer == null || activeRecording != null) return;
         int max = Math.max(0, musicPlayer.getDuration() - 1);
         audioStartMs = Math.max(0, Math.min(max, audioStartMs + deltaMs));
-        musicSeekBar.setProgress(audioStartMs);
+        audioTimeline.setPositionMs(audioStartMs);
         try { musicPlayer.seekTo(audioStartMs); } catch (Exception ignored) { }
         audioStatus.setText("DÉPART AJUSTÉ · " + formatPrecise(audioStartMs));
     }
@@ -585,7 +594,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         if (!musicPrepared || musicPlayer == null || activeRecording != null) return;
         int max = Math.max(0, musicPlayer.getDuration() - 1);
         audioStartMs = Math.max(0, Math.min(max, detectedAudioStartMs));
-        musicSeekBar.setProgress(audioStartMs);
+        audioTimeline.setPositionMs(audioStartMs);
         try { musicPlayer.seekTo(audioStartMs); } catch (Exception ignored) { }
         audioStatus.setText("DÉBUT AUTO · " + formatPrecise(audioStartMs));
     }

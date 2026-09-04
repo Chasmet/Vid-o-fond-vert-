@@ -33,6 +33,11 @@ final class H264FrameEncoder implements AutoCloseable {
     private boolean finished;
 
     H264FrameEncoder(File output, int width, int height, int frameRate) throws IOException {
+        this(output, width, height, frameRate, 0);
+    }
+
+    H264FrameEncoder(File output, int width, int height, int frameRate,
+                     int orientationHint) throws IOException {
         this.width = width;
         this.height = height;
         pixelBuffer = new int[width * height];
@@ -56,6 +61,9 @@ final class H264FrameEncoder implements AutoCloseable {
         codec.start();
         muxer = new MediaMuxer(output.getAbsolutePath(),
                 MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+        if (orientationHint == 90 || orientationHint == 180 || orientationHint == 270) {
+            muxer.setOrientationHint(orientationHint);
+        }
     }
 
     void encode(Bitmap bitmap, long presentationTimeUs) throws IOException {

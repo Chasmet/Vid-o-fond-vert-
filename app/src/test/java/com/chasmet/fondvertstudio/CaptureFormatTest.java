@@ -1,5 +1,7 @@
 package com.chasmet.fondvertstudio;
 
+import android.view.Surface;
+
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -26,5 +28,21 @@ public final class CaptureFormatTest {
         assertEquals(CaptureFormat.VERTICAL, CaptureFormat.sanitize("square"));
         assertEquals(CaptureFormat.HORIZONTAL,
                 CaptureFormat.sanitize(CaptureFormat.HORIZONTAL));
+    }
+
+    @Test
+    public void rejectsStaleLandscapeRotationForVerticalCapture() {
+        assertEquals(Surface.ROTATION_0,
+                CaptureFormat.normalizeCameraRotation(Surface.ROTATION_90, false));
+        assertEquals(Surface.ROTATION_180,
+                CaptureFormat.normalizeCameraRotation(Surface.ROTATION_180, false));
+    }
+
+    @Test
+    public void rejectsStalePortraitRotationForHorizontalCapture() {
+        assertEquals(Surface.ROTATION_90,
+                CaptureFormat.normalizeCameraRotation(Surface.ROTATION_0, true));
+        assertEquals(Surface.ROTATION_270,
+                CaptureFormat.normalizeCameraRotation(Surface.ROTATION_270, true));
     }
 }

@@ -1,0 +1,20 @@
+package com.chasmet.fondvertstudio;
+
+import org.junit.Test;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+public final class AudioWaveformExtractorTest {
+    @Test
+    public void normalizesWaveformWithoutLosingSilence() {
+        float[] normalized = AudioWaveformExtractor.normalize(
+                new float[]{0f, 0f, 0.04f, 0.16f, 0.50f, 1f});
+
+        assertEquals(6, normalized.length);
+        assertEquals(0f, normalized[0], 0.0001f);
+        assertTrue(normalized[3] > normalized[2]);
+        assertTrue(normalized[5] <= 1f);
+        assertTrue(normalized[5] >= 0.99f);
+    }
+}

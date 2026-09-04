@@ -29,6 +29,7 @@ public final class VideoRendererWorker extends Worker {
     public static final String KEY_THRESHOLD = "threshold";
     public static final String KEY_SOFTNESS = "softness";
     public static final String KEY_QUALITY = "quality";
+    public static final String KEY_HORIZONTAL_FORMAT = "horizontal_format";
     public static final String KEY_MIRROR_SOURCE = "mirror_source";
     public static final String KEY_TRANSFORM_SCALE = "transform_scale";
     public static final String KEY_TRANSFORM_CENTER_X = "transform_center_x";
@@ -68,6 +69,8 @@ public final class VideoRendererWorker extends Worker {
         float threshold = getInputData().getFloat(KEY_THRESHOLD, 0.50f);
         float softness = getInputData().getFloat(KEY_SOFTNESS, 0.065f);
         int quality = getInputData().getInt(KEY_QUALITY, 1080);
+        boolean horizontalOutput = getInputData().getBoolean(
+                KEY_HORIZONTAL_FORMAT, false);
         boolean mirrorSource = getInputData().getBoolean(KEY_MIRROR_SOURCE, false);
 
         String transformPath = getInputData().getString(KEY_TRANSFORM_PATH);
@@ -102,13 +105,8 @@ public final class VideoRendererWorker extends Worker {
         try {
             setProgressAsync(new Data.Builder().putInt(KEY_PROGRESS, 1).build());
             ArrayList<SourceInfo> infos = inspectSources(sourceTimeline);
-            SourceInfo first = infos.get(0);
-            int maxWidth = first.width >= first.height ? quality * 16 / 9 : quality;
-            int maxHeight = first.width >= first.height ? quality : quality * 16 / 9;
-            int[] outputSize = BitmapUtils.fitInside(first.width, first.height,
-                    maxWidth, maxHeight);
-            int outputWidth = outputSize[0];
-            int outputHeight = outputSize[1];
+            int outputWidth = CaptureFormat.videoWidth(horizontalOutput, quality);
+            int outputHeight = CaptureFormat.videoHeight(horizontalOutput, quality);
             int frameRate = 30;
 
             long totalFrames = 0L;

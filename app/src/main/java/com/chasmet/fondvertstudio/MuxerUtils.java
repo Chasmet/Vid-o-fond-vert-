@@ -4,6 +4,7 @@ import android.content.Context;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
+import android.media.MediaMetadataRetriever;
 import android.media.MediaMuxer;
 import android.net.Uri;
 
@@ -171,6 +172,8 @@ final class MuxerUtils {
             }
             muxer = new MediaMuxer(output.getAbsolutePath(),
                     MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+            int sourceRotation = readVideoRotation(videoOnly);
+            if (sourceRotation != 0) muxer.setOrientationHint(sourceRotation);
             int outputVideoTrack = muxer.addTrack(videoExtractor.getTrackFormat(videoTrack));
             int outputAudioTrack = muxer.addTrack(audioExtractor.getTrackFormat(audioTrack));
             muxer.start();
@@ -257,6 +260,23 @@ final class MuxerUtils {
             if (mime != null && mime.startsWith(prefix)) return i;
         }
         return -1;
+    }
+
+    static int readVideoRotation(File source) {
+        if (source == null || !source.isFile()) return 0;
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(source.getAbsolutePath());
+            String value = retriever.extractMetadata(
+                    MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+            int rotation = value == null ? 0 : Integer.parseInt(value);
+            rotation = ((rotation % 360) + 360) % 360;
+            return rotation == 90 || rotation == 180 || rotation == 270 ? rotation : 0;
+        } catch (Exception ignored) {
+            return 0;
+        } finally {
+            try { retriever.release(); } catch (Exception ignored) { }
+        }
     }
 
     private static void setDataSource(MediaExtractor extractor, Context context, Uri uri)

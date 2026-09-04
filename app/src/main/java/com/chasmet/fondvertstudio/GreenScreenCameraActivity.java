@@ -20,7 +20,6 @@ import android.util.Size;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
-import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -98,7 +97,7 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
     private MaterialButton audioMinusButton;
     private MaterialButton audioAutoButton;
     private MaterialButton audioPlusButton;
-    private SeekBar musicSeekBar;
+    private AudioTimelineView audioTimeline;
 
     private ProcessCameraProvider cameraProvider;
     private VideoCapture<Recorder> videoCapture;
@@ -197,7 +196,7 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
         if (getIntent().getBooleanExtra(ProjectRepository.EXTRA_RESUME_PROJECT, false)) {
             restoredProject = restoreProject();
         }
-        if (renderedClipFile == null) requestCamera();
+        if (renderedClipFile == null) previewContainer.post(this::requestCamera);
     }
 
     private void bindViews() {
@@ -231,7 +230,7 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
         audioMinusButton = findViewById(R.id.audioMinusButton);
         audioAutoButton = findViewById(R.id.audioAutoButton);
         audioPlusButton = findViewById(R.id.audioPlusButton);
-        musicSeekBar = findViewById(R.id.musicSeekBar);
+        audioTimeline = findViewById(R.id.audioTimeline);
     }
 
     private void registerPickers() {
@@ -325,16 +324,22 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
             transformHint.setText(finished ? "Glisse · pince pour zoomer" : "SUJET · " + percent + " %");
             if (finished) checkpointProject();
         });
-        musicSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
-                updateMusicPosition(progress);
+        audioTimeline.setOnPositionChangeListener(
+                new AudioTimelineView.OnPositionChangeListener() {
+            @Override
+            public void onPositionChanged(int positionMs, boolean fromUser) {
+                clipAudioStartMs = positionMs;
+                updateMusicPosition(positionMs);
                 if (fromUser && musicPrepared && musicPlayer != null && !sessionActive) {
-                    try { musicPlayer.seekTo(progress); } catch (Exception ignored) { }
+                    try { musicPlayer.seekTo(positionMs); } catch (Exception ignored) { }
                 }
             }
-            @Override public void onStartTrackingTouch(SeekBar bar) { }
-            @Override public void onStopTrackingTouch(SeekBar bar) {
-                clipStatus.setText("DÉPART MANUEL · " + formatPrecise(bar.getProgress()));
+
+            @Override
+            public void onScrubFinished(int positionMs) {
+                clipAudioStartMs = positionMs;
+                clipStatus.setText("DÉPART MANUEL · " + formatPrecise(positionMs));
+                checkpointProject();
             }
         });
     }
@@ -469,7 +474,7 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
             latestMaskHeight = 0;
         }
         Quality q = quality == 1080 ? Quality.FHD : Quality.HD;
-        int targetRotation = CaptureFormat.surfaceRotation(this);
+        int targetRotation = CaptureFormat.cameraTargetRotation(this, horizontalFormat);
         Recorder recorder = new Recorder.Builder().setQualitySelector(
                 QualitySelector.from(q, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))).build();
         videoCapture = VideoCapture.withOutput(recorder);
@@ -588,8 +593,10 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
             });
             musicPlayer.setOnPreparedListener(player -> {
                 musicPrepared = true;
-                musicSeekBar.setMax(Math.max(1, player.getDuration()));
-                musicSeekBar.setProgress(0);
+                audioTimeline.setDurationMs(Math.max(1, player.getDuration()));
+                audioTimeline.setPositionMs(0);
+                audioTimeline.setDetectedStartMs(-1);
+                audioTimeline.setWaveform(null);
                 updateMusicPosition(0);
                 prepareAudio(uri, player.getDuration());
             });
@@ -620,6 +627,14 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
                     detected = 0;
                 }
                 int finalDetected = Math.max(0, Math.min(durationMs - 1, detected));
+                float[] waveform;
+                try {
+                    waveform = AudioWaveformExtractor.extract(
+                            this, prepared, durationMs, 1800);
+                } catch (Exception ignored) {
+                    waveform = new float[0];
+                }
+                float[] finalWaveform = waveform;
                 runOnUiThread(() -> {
                     preparedMusicUri = prepared;
                     preparedAudioFile = generated ? destination : null;
@@ -632,7 +647,9 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
                             : finalDetected;
                     pendingRestoredAudioStartMs = -1;
                     clipAudioStartMs = selectedStart;
-                    musicSeekBar.setProgress(selectedStart);
+                    audioTimeline.setWaveform(finalWaveform);
+                    audioTimeline.setDetectedStartMs(finalDetected);
+                    audioTimeline.setPositionMs(selectedStart);
                     updateMusicPosition(selectedStart);
                     audioMinusButton.setEnabled(true);
                     audioAutoButton.setEnabled(true);
@@ -700,7 +717,7 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
         } catch (Exception error) {
             realtimeRecorder = null;
         }
-        clipAudioStartMs = musicSeekBar.getProgress();
+        clipAudioStartMs = audioTimeline.getPositionMs();
         startPlan();
     }
 
@@ -897,6 +914,7 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
                 .putFloat(VideoRendererWorker.KEY_THRESHOLD, THRESHOLD)
                 .putFloat(VideoRendererWorker.KEY_SOFTNESS, SOFTNESS)
                 .putInt(VideoRendererWorker.KEY_QUALITY, quality)
+                .putBoolean(VideoRendererWorker.KEY_HORIZONTAL_FORMAT, horizontalFormat)
                 .putBoolean(VideoRendererWorker.KEY_MIRROR_SOURCE,
                         lensFacing == CameraSelector.LENS_FACING_FRONT)
                 .putFloat(VideoRendererWorker.KEY_TRANSFORM_SCALE, liveScale)
@@ -1103,8 +1121,9 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
         if (!musicPrepared || musicPlayer == null || sessionActive) return;
         int max = Math.max(0, musicPlayer.getDuration() - 1);
         int next = Math.max(0, Math.min(max,
-                musicSeekBar.getProgress() + deltaMs));
-        musicSeekBar.setProgress(next);
+                audioTimeline.getPositionMs() + deltaMs));
+        audioTimeline.setPositionMs(next);
+        clipAudioStartMs = next;
         try { musicPlayer.seekTo(next); } catch (Exception ignored) { }
         clipStatus.setText("DÉPART AJUSTÉ · " + formatPrecise(next));
     }
@@ -1113,7 +1132,8 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
         if (!musicPrepared || musicPlayer == null || sessionActive) return;
         int max = Math.max(0, musicPlayer.getDuration() - 1);
         int next = Math.max(0, Math.min(max, detectedAudioStartMs));
-        musicSeekBar.setProgress(next);
+        audioTimeline.setPositionMs(next);
+        clipAudioStartMs = next;
         try { musicPlayer.seekTo(next); } catch (Exception ignored) { }
         clipStatus.setText("DÉBUT AUTO · " + formatPrecise(next));
     }
@@ -1125,6 +1145,8 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
                 musicPlayer.pause();
                 musicPlayButton.setText("▶ ÉCOUTER");
             } else {
+                musicPlayer.seekTo(Math.min(audioTimeline.getPositionMs(),
+                        Math.max(0, musicPlayer.getDuration() - 1)));
                 musicPlayer.start();
                 musicPlayButton.setText("Ⅱ PAUSE SON");
             }
@@ -1328,7 +1350,7 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
         greenButton.setEnabled(idle);
         importAudioButton.setEnabled(false);
         downloadsMusicButton.setEnabled(false);
-        musicSeekBar.setEnabled(false);
+        audioTimeline.setEnabled(false);
         audioMinusButton.setEnabled(false);
         audioAutoButton.setEnabled(false);
         audioPlusButton.setEnabled(false);
@@ -1342,7 +1364,7 @@ public final class GreenScreenCameraActivity extends AppCompatActivity {
         greenButton.setEnabled(enabled);
         importAudioButton.setEnabled(enabled);
         downloadsMusicButton.setEnabled(enabled);
-        musicSeekBar.setEnabled(enabled && musicPrepared);
+        audioTimeline.setEnabled(enabled && musicPrepared);
         musicPlayButton.setEnabled(enabled && musicPrepared);
         boolean audioReady = enabled && musicPrepared
                 && preparedMusicUri != null && !audioPreparing;

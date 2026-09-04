@@ -3,6 +3,7 @@ package com.chasmet.fondvertstudio;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -14,6 +15,7 @@ import org.junit.runner.RunWith;
 import java.io.File;
 import java.io.FileOutputStream;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(AndroidJUnit4.class)
@@ -69,8 +71,45 @@ public final class MediaPipelineInstrumentedTest {
         }
     }
 
+    @Test
+    public void preservesPortraitRotationWhileMuxingImportedAudio() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File cameraVideo = new File(context.getCacheDir(), "portrait-camera.mp4");
+        File wav = createPcmWav(context, "portrait-mux.wav", 16, 800);
+        File aac = new File(context.getCacheDir(), "portrait-mux.m4a");
+        File finalVideo = new File(context.getCacheDir(), "portrait-final.mp4");
+        try {
+            createVideo(cameraVideo, Color.BLUE, 90);
+            WavToAacTranscoder.transcode(context, Uri.fromFile(wav), aac,
+                    0L, 600_000L);
+            MuxerUtils.addAudio(context, cameraVideo, Uri.fromFile(aac), finalVideo,
+                    250_000L, 0L);
+
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            try {
+                retriever.setDataSource(finalVideo.getAbsolutePath());
+                assertEquals("90", retriever.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION));
+            } finally {
+                retriever.release();
+            }
+            assertTrue(MuxerUtils.hasAudioTrack(finalVideo));
+        } finally {
+            cameraVideo.delete();
+            wav.delete();
+            aac.delete();
+            finalVideo.delete();
+        }
+    }
+
     private static void createVideo(File output, int color) throws Exception {
-        H264FrameEncoder encoder = new H264FrameEncoder(output, 320, 240, 30);
+        createVideo(output, color, 0);
+    }
+
+    private static void createVideo(File output, int color, int orientationHint)
+            throws Exception {
+        H264FrameEncoder encoder = new H264FrameEncoder(
+                output, 320, 240, 30, orientationHint);
         Bitmap bitmap = Bitmap.createBitmap(320, 240, Bitmap.Config.ARGB_8888);
         bitmap.eraseColor(color);
         try {
