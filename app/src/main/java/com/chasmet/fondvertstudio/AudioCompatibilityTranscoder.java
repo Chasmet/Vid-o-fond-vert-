@@ -39,6 +39,20 @@ final class AudioCompatibilityTranscoder {
             throw new IOException("Dossier audio temporaire inaccessible");
         }
 
+        // Les WAV de mastering sont traités d'abord par notre convertisseur natif
+        // PCM/Float -> AAC. Media3 Transformer échoue sur certains appareils avec
+        // ces sources alors que le WAV est parfaitement lisible.
+        if (WavToAacTranscoder.isWav(context, inputUri)) {
+            try {
+                WavToAacTranscoder.transcode(
+                        context, inputUri, outputFile, startUs, durationUs);
+                return;
+            } catch (IOException nativeWavError) {
+                // On garde Media3 comme second filet de compatibilité.
+                if (outputFile.exists()) outputFile.delete();
+            }
+        }
+
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<Throwable> failure = new AtomicReference<>();
         AtomicReference<Transformer> activeTransformer = new AtomicReference<>();
