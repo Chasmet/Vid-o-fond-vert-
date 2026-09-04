@@ -86,7 +86,7 @@ final class AudioStartDetector {
                             } else {
                                 decoder.queueInputBuffer(inputIndex, 0, size,
                                         sampleTimeUs, extractor.getSampleFlags());
-                                if (!extractor.advance()) inputEnded = true;
+                                extractor.advance();
                             }
                         }
                     }
