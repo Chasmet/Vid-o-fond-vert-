@@ -39,6 +39,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private boolean busy=false,drag=false;
     private int lead=1000,active=-1;
     private static final String MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/0b364b566045a405be7225ee1e415a073e04da77/ggml-large-v3-turbo-q5_0.bin";
+    private static final long MODEL_MIN_BYTES=570000000L;
     private static final String MODEL_SHA1="e050f7970618a659205450ad97eb95a18d69c9ee";
     private static final class Line {
         long start,end;String text;
@@ -139,12 +140,13 @@ public final class MusicPrompterActivity extends AppCompatActivity {
             startActivity(intent);
         }).show();
     }
-    private File model(){return new File(getFilesDir(),"ggml-small-q5_1.bin");}
-    private void confirmAnalysis(){if(source==null)return;if(!model().exists()){new AlertDialog.Builder(this).setTitle("Télécharger le modèle local").setMessage("Nouveau modèle Large V3 Turbo : environ 574 Mo. Téléchargement unique, puis transcription sans Internet. Le téléphone peut chauffer pendant l’analyse.").setNegativeButton("Annuler",null).setPositiveButton("Télécharger et analyser",(d,w)->runAnalysis()).show();}else runAnalysis();}
+    private File model(){return new File(getFilesDir(),"ggml-large-v3-turbo-q5_0.bin");}
+    private void confirmAnalysis(){if(source==null)return;if(!model().isFile()||model().length()<MODEL_MIN_BYTES){new AlertDialog.Builder(this).setTitle("Télécharger le modèle local").setMessage("Nouveau modèle Large V3 Turbo : environ 574 Mo. Téléchargement unique, puis transcription sans Internet. Le téléphone peut chauffer pendant l’analyse.").setNegativeButton("Annuler",null).setPositiveButton("Télécharger et analyser",(d,w)->runAnalysis()).show();}else runAnalysis();}
     private void message(String s){ui.post(()->{if(!dead){if(analyzing){phase=s;analysisProgress=-1;}status.setText(s);}});}
     private void reportProgress(int value){ui.post(()->{if(dead||!analyzing||cancelled)return;analysisProgress=Math.max(analysisProgress,Math.min(100,Math.max(0,value)));phase="Transcription Large V3 Turbo";progress.setIndeterminate(analysisProgress==0);if(analysisProgress>0)progress.setProgress(analysisProgress);});}
     private void ensureModel() throws Exception {
-        File dst=model();if(dst.exists())return;
+        File dst=model();if(dst.isFile()&&dst.length()>=MODEL_MIN_BYTES)return;
+        if(dst.exists()&&!dst.delete())throw new IOException("Impossible de remplacer le modèle incomplet");
         File tmp=File.createTempFile("turbo-model-", ".part",getFilesDir());
         HttpsURLConnectionHolder h=new HttpsURLConnectionHolder();
         MessageDigest hash=MessageDigest.getInstance("SHA-1");long total=0;
