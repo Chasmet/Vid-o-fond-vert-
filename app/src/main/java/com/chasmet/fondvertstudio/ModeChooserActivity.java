@@ -31,6 +31,7 @@ public final class ModeChooserActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_mode_chooser);
         projectRepository = new ProjectRepository(this);
+        findViewById(R.id.prompterModeButton).setOnClickListener(v -> startActivity(new Intent(this, MusicPrompterActivity.class)));
 
         verticalButton = findViewById(R.id.verticalFormatButton);
         horizontalButton = findViewById(R.id.horizontalFormatButton);

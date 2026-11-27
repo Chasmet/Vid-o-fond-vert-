@@ -44,6 +44,8 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".MusicPrompterActivity" android:exported="false" android:screenOrientation="portrait" />
+
         <activity
             android:name=".SettingsActivity"
             android:exported="false"
