@@ -14,8 +14,8 @@ android {
         targetSdk 34
         ndk { abiFilters 'arm64-v8a', 'x86_64' }
         externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_shared'; targets 'chkwhisper' } }
-        versionCode 35
-        versionName '1.14.4'
+        versionCode 36
+        versionName '1.15.0'
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         vectorDrawables.useSupportLibrary = true
@@ -50,13 +50,42 @@ android {
     }
 
     packaging {
+        jniLibs { pickFirsts += ['**/libc++_shared.so'] }
         resources {
             excludes += ['/META-INF/{AL2.0,LGPL2.1}', 'META-INF/DEPENDENCIES']
         }
     }
 }
 
+// The official Android AAR is fetched and integrity-checked by the CI and local Gradle builds.
+def sherpaAar = rootProject.file(".gradle/thirdparty/sherpa-onnx-1.13.7.aar")
+def sherpaSha = 'c4ef49e309f24fcee5c106b8a279481aaecaabb078cd37b2cd6e9a62cc8a73c8'
+def sherpaValid = {
+    if (!sherpaAar.isFile()) return false
+    def md = java.security.MessageDigest.getInstance('SHA-256')
+    sherpaAar.withInputStream { stream ->
+        byte[] buf = new byte[65536]
+        int read
+        while ((read = stream.read(buf)) != -1) md.update(buf, 0, read)
+    }
+    md.digest().encodeHex().toString() == sherpaSha
+}
+if (!sherpaValid()) {
+    sherpaAar.parentFile.mkdirs()
+    def tmp = new File(sherpaAar.parentFile, 'sherpa.part')
+    def conn = new URL('https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.7/sherpa-onnx-1.13.7.aar').openConnection()
+    conn.connectTimeout = 30000
+    conn.readTimeout = 60000
+    conn.inputStream.withCloseable { input -> tmp.withOutputStream { out -> out << input } }
+    java.nio.file.Files.move(tmp.toPath(), sherpaAar.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    if (!sherpaValid()) { sherpaAar.delete(); throw new GradleException('Sherpa AAR checksum mismatch') }
+}
+
 dependencies {
+    implementation files(sherpaAar)
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'
+    implementation 'org.apache.commons:commons-compress:1.26.2'
+    implementation 'commons-io:commons-io:2.16.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.core:core:1.13.1'
     implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
