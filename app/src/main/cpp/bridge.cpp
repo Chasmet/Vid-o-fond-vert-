@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_chasmet_fondvertstudio_LocalWhisper_transcribe(JNIEnv *env, jclass, jstring file, jfloatArray audio, jint threads) {
+Java_com_chasmet_fondvertstudio_LocalWhisper_transcribe(JNIEnv *env, jclass, jstring file, jfloatArray audio, jint threads, jobject progress) {
     const char *path = env->GetStringUTFChars(file, nullptr);
     auto cp = whisper_context_default_params();
     cp.use_gpu = false;
@@ -19,10 +19,34 @@ Java_com_chasmet_fondvertstudio_LocalWhisper_transcribe(JNIEnv *env, jclass, jst
     params.print_timestamps = false;
     params.no_timestamps = false;
     params.no_context = true;
+    struct ProgressData { JavaVM *vm; jobject object; jmethodID method; };
+    ProgressData data{};
+    env->GetJavaVM(&data.vm);
+    if (progress) {
+        data.object = env->NewGlobalRef(progress);
+        jclass type = env->GetObjectClass(progress);
+        data.method = env->GetMethodID(type, "update", "(I)V");
+        env->DeleteLocalRef(type);
+        params.progress_callback_user_data = &data;
+        params.progress_callback = [](struct whisper_context *, struct whisper_state *, int value, void *opaque) {
+            auto *d = static_cast<ProgressData *>(opaque);
+            JNIEnv *e = nullptr;
+            bool attached = false;
+            if (d->vm->GetEnv(reinterpret_cast<void **>(&e), JNI_VERSION_1_6) != JNI_OK) {
+                if (d->vm->AttachCurrentThread(&e, nullptr) != JNI_OK) return;
+                attached = true;
+            }
+            if (d->method) e->CallVoidMethod(d->object, d->method, value);
+            if (e->ExceptionCheck()) e->ExceptionClear();
+            if (attached) d->vm->DetachCurrentThread();
+        };
+    }
     auto size = env->GetArrayLength(audio);
     std::vector<float> pcm(size);
     env->GetFloatArrayRegion(audio, 0, size, pcm.data());
-    if (whisper_full(ctx, params, pcm.data(), size) != 0) { whisper_free(ctx); return nullptr; }
+    int rc = whisper_full(ctx, params, pcm.data(), size);
+    if (data.object) env->DeleteGlobalRef(data.object);
+    if (rc != 0) { whisper_free(ctx); return nullptr; }
     int count = whisper_full_n_segments(ctx);
     auto cls = env->FindClass("java/lang/String");
     auto arr = env->NewObjectArray(count * 3, cls, nullptr);

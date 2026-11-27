@@ -59,6 +59,10 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     }
 
     private PreviewView previewView;
+    private TextView prompterOverlay;
+    private org.json.JSONArray prompterLines;
+    private int prompterLead;
+    private boolean prompterMode;
     private MaterialButton recordButton;
     private MaterialButton flipButton;
     private MaterialButton qualityButton;
@@ -185,7 +189,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         findViewById(R.id.classicBackButton).setOnClickListener(v -> finish());
         importAudioButton.setOnClickListener(v -> {
             if (activeRecording == null && !audioPreparing) {
-                audioPicker.launch(new String[]{"audio/*"});
+                audioPicker.launch(new String[]{"*/*"});
             }
         });
         musicPlayButton.setOnClickListener(v -> toggleMusic());
@@ -237,6 +241,32 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         audioPlusButton.setEnabled(false);
         audioStatus.setText(CaptureFormat.label(horizontalFormat)
                 + " · MICRO COUPÉ · IMPORTE UNE MUSIQUE");
+        if(getIntent().getBooleanExtra("music_prompter_camera",false)&&getIntent().getData()!=null){
+            prompterMode=true;
+            try{
+                org.json.JSONObject project=new org.json.JSONObject(getSharedPreferences("music_prompter",0).getString("project","{}"));
+                prompterLines=project.optJSONArray("lines");prompterLead=project.optInt("lead",1000);
+            }catch(org.json.JSONException ignored){}
+            androidx.constraintlayout.widget.ConstraintLayout container=(androidx.constraintlayout.widget.ConstraintLayout)previewView.getParent();
+            prompterOverlay=new TextView(this);
+            prompterOverlay.setId(View.generateViewId());
+            prompterOverlay.setTextColor(0xff9affda);prompterOverlay.setTextSize(horizontalFormat?18:25);
+            prompterOverlay.setGravity(android.view.Gravity.CENTER);
+            prompterOverlay.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            prompterOverlay.setBackgroundColor(0xc0000000);
+            int pad=(int)(8*getResources().getDisplayMetrics().density);prompterOverlay.setPadding(pad,pad,pad,pad);
+            prompterOverlay.setMaxLines(horizontalFormat?4:6);
+            prompterOverlay.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            androidx.constraintlayout.widget.ConstraintLayout.LayoutParams lp=new androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(0,-2);
+            lp.topToBottom=R.id.classicQualityButton;lp.startToStart=androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID;lp.endToEnd=androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID;lp.topMargin=pad*2;lp.leftMargin=pad*2;lp.rightMargin=pad*2;
+            container.addView(prompterOverlay,lp);
+            renderPrompter(0);
+            importAudioButton.setText("PROMPTEUR");
+            importAudioButton.setOnClickListener(v->Toast.makeText(this,"Retour au prompteur pour changer de morceau",Toast.LENGTH_SHORT).show());
+            loadMusic(getIntent().getData());
+            audioStartEdited=true;
+            String name=getIntent().getStringExtra("music_prompter_name");if(name!=null)audioName.setText(name);
+        }
         previewView.post(this::requestCamera);
     }
 
@@ -374,7 +404,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                     detectedAudioStartMs = finalDetected;
                     audioTimeline.setWaveform(analysis.waveform);
                     audioTimeline.setDetectedStartMs(finalDetected);
-                    if (!audioStartEdited && captureState == CaptureState.IDLE
+                    if (!prompterMode && !audioStartEdited && captureState == CaptureState.IDLE
                             && activeRecording == null) {
                         audioStartMs = finalDetected;
                         audioTimeline.setPositionMs(finalDetected);
@@ -427,6 +457,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
             return;
         }
         if (preparedMusicUri == null || !musicPrepared) {
+            if(prompterMode){Toast.makeText(this,"La musique doit être prête avant de filmer.",Toast.LENGTH_LONG).show();return;}
             Toast.makeText(this,
                     "Importe une musique : le micro reste toujours coupé",
                     Toast.LENGTH_LONG).show();
@@ -696,7 +727,20 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         uiHandler.postDelayed(musicProgressTick, 30L);
     }
 
+    private void renderPrompter(int positionMs){
+        if(prompterOverlay==null||prompterLines==null)return;
+        int active=-1;long t=(long)positionMs+prompterLead;
+        for(int i=0;i<prompterLines.length();i++){org.json.JSONArray l=prompterLines.optJSONArray(i);if(l!=null&&l.optLong(0)<=t)active=i;else break;}
+        org.json.JSONArray line=prompterLines.optJSONArray(active),nextLine=prompterLines.optJSONArray(active+1);
+        String first=line==null?"Prépare-toi…":line.optString(2);String second=nextLine==null?"":nextLine.optString(2);
+        String combined=first+(second.isEmpty()?"":"\n\n"+second);
+        android.text.SpannableString styled=new android.text.SpannableString(combined);
+        if(!second.isEmpty()){styled.setSpan(new android.text.style.ForegroundColorSpan(0xffffffff),first.length()+2,combined.length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);styled.setSpan(new android.text.style.RelativeSizeSpan(.75f),first.length()+2,combined.length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);}
+        prompterOverlay.setText(styled);
+    }
+
     private void updateAudioPosition(int positionMs) {
+        renderPrompter(positionMs);
         int duration = musicPrepared && musicPlayer != null
                 ? musicPlayer.getDuration() : 0;
         audioStatus.setText(formatDuration(positionMs)

@@ -3,3 +3,6 @@
 -dontwarn com.google.mlkit.**
 
 -keep class com.chasmet.fondvertstudio.LocalWhisper { *; }
+
+-keep interface com.chasmet.fondvertstudio.LocalWhisper$Progress { *; }
+-keepclassmembers class * implements com.chasmet.fondvertstudio.LocalWhisper$Progress { public void update(int); }
