@@ -43,7 +43,6 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private LinearLayout root;
     private boolean busy=false,drag=false;
     private int lead=1000,active=-1;
-    private static final String MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/0b364b566045a405be7225ee1e415a073e04da77/ggml-large-v3-turbo-q5_0.bin";
     private static final long MODEL_MIN_BYTES=570000000L;
     private static final String MODEL_SHA1="e050f7970618a659205450ad97eb95a18d69c9ee";
     private static final class Line {
@@ -61,7 +60,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         button("Retour",()->finish());
         label("PROMPTEUR MUSICAL IA",25,0xff36e2a3);
-        status=label("Qwen3-ASR · analyse locale",14,0xffb4bbc3);
+        status=label("Modèles inclus · fonctionnement hors ligne",14,0xffb4bbc3);
         fileInfo=label("Aucun morceau importé",17,0xffffffff);
         fileInfo.setBackgroundColor(0xff172820);
         backingInfo=label("Instrumental : aucun",13,0xffb4bbc3);
@@ -70,7 +69,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         vocalInfo=label("Source de transcription : morceau original",13,0xffb4bbc3);
         pickVocal=button("Importer voix studio seule (facultatif)",()->choose(3));
         clearVocal=button("Analyser le morceau original",()->{if(busy)return;vocal=null;vocalPlayable=null;save();refresh();});
-        isolateVoice=new CheckBox(this);isolateVoice.setText("Isoler automatiquement la voix (UVR · 67 Mo)");isolateVoice.setTextColor(0xffffffff);isolateVoice.setChecked(QwenLocal.supported()&&getSharedPreferences("music_prompter",0).getBoolean("isolate_voice",true));root.addView(isolateVoice);isolateVoice.setOnCheckedChangeListener((v,checked)->getSharedPreferences("music_prompter",0).edit().putBoolean("isolate_voice",checked).apply());
+        isolateVoice=new CheckBox(this);isolateVoice.setText("Isoler automatiquement la voix (UVR inclus)");isolateVoice.setTextColor(0xffffffff);isolateVoice.setChecked(QwenLocal.supported()&&getSharedPreferences("music_prompter",0).getBoolean("isolate_voice",true));root.addView(isolateVoice);isolateVoice.setOnCheckedChangeListener((v,checked)->getSharedPreferences("music_prompter",0).edit().putBoolean("isolate_voice",checked).apply());
         label("Moteur de transcription",16,0xffffffff);
         engineChoice=new android.widget.RadioGroup(this);engineChoice.setOrientation(LinearLayout.VERTICAL);
         android.widget.RadioButton q=new android.widget.RadioButton(this);q.setId(View.generateViewId());q.setText(QwenLocal.supported()?"Qwen3-ASR 0.6B · chant / musique":"Qwen3-ASR · Android 8 minimum");q.setTextColor(0xffffffff);engineChoice.addView(q);
@@ -153,28 +152,26 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         }).show();
     }
     private File model(){return new File(getFilesDir(),"ggml-large-v3-turbo-q5_0.bin");}
-    private void confirmAnalysis(){if(source==null||busy)return;if(!QwenLocal.supported())useQwen=false;if(useQwen){if(QwenLocal.ready(this))runAnalysis();else new AlertDialog.Builder(this).setTitle("Installer Qwen3-ASR local").setMessage("Téléchargement unique : 879 Mo. Prévois 2,2 Go libres pour l’installation. Aucun audio envoyé. Si la séparation UVR est activée, 67 Mo supplémentaires seront téléchargés. Les horaires restent approximatifs.").setNegativeButton("Annuler",null).setPositiveButton("Télécharger et analyser",(d,w)->runAnalysis()).show();return;}if(!model().isFile()||model().length()<MODEL_MIN_BYTES){new AlertDialog.Builder(this).setTitle("Télécharger le modèle local").setMessage("Nouveau modèle Large V3 Turbo : environ 574 Mo. Téléchargement unique, puis transcription sans Internet. Le téléphone peut chauffer pendant l’analyse. UVR nécessite 67 Mo supplémentaires si activé.").setNegativeButton("Annuler",null).setPositiveButton("Télécharger et analyser",(d,w)->runAnalysis()).show();}else runAnalysis();}
+    private void confirmAnalysis(){if(source==null||busy)return;if(!QwenLocal.supported())useQwen=false;runAnalysis();}
     private void message(String s){ui.post(()->{if(!dead){if(analyzing){phase=s;analysisProgress=-1;}status.setText(s);}});}
     private void reportProgress(int value){ui.post(()->{if(dead||!analyzing||cancelled)return;analysisProgress=Math.max(analysisProgress,Math.min(100,Math.max(0,value)));phase=useQwen?"Transcription Qwen3-ASR":"Transcription Large V3 Turbo";progress.setIndeterminate(analysisProgress==0);if(analysisProgress>0)progress.setProgress(analysisProgress);});}
     private void ensureModel() throws Exception {
         File dst=model();if(dst.isFile()&&dst.length()>=MODEL_MIN_BYTES)return;
+        if(getFilesDir().getUsableSpace()<650000000L)throw new IOException("Libère 650 Mo pour préparer Whisper.");
         if(dst.exists()&&!dst.delete())throw new IOException("Impossible de remplacer le modèle incomplet");
         File tmp=File.createTempFile("turbo-model-", ".part",getFilesDir());
-        HttpsURLConnectionHolder h=new HttpsURLConnectionHolder();
-        MessageDigest hash=MessageDigest.getInstance("SHA-1");long total=0;
-        try{
-            h.conn=(HttpURLConnection)new URL(MODEL_URL).openConnection();h.conn.setConnectTimeout(20000);h.conn.setReadTimeout(30000);
-            if(h.conn.getResponseCode()!=200)throw new IOException("Téléchargement modèle : HTTP "+h.conn.getResponseCode());
-            try(InputStream in=h.conn.getInputStream();OutputStream out=new FileOutputStream(tmp)){
-                byte[] buf=new byte[65536];int n;long last=0;
-                while((n=in.read(buf))!=-1){if(cancelled||Thread.currentThread().isInterrupted())throw new InterruptedException();out.write(buf,0,n);hash.update(buf,0,n);total+=n;if(total>650000000)throw new IOException("Modèle trop grand");if(total-last>4000000){last=total;message("Téléchargement : "+total/1000000+" / ~574 Mo");}}
+        MessageDigest hash=MessageDigest.getInstance("SHA-1");long total=0,last=0;
+        try {
+            message("Préparation locale de Whisper inclus…");
+            try(InputStream in=getAssets().open("models/ggml-large-v3-turbo-q5_0.bin");OutputStream out=new BufferedOutputStream(new FileOutputStream(tmp))){
+                byte[] buf=new byte[65536];int count;
+                while((count=in.read(buf))!=-1){if(cancelled||Thread.currentThread().isInterrupted())throw new InterruptedException();out.write(buf,0,count);hash.update(buf,0,count);total+=count;if(total>650000000L)throw new IOException("Modèle trop grand");if(total-last>8000000){last=total;message("Préparation locale Whisper : "+total/1000000+" / 574 Mo");}}
             }
             StringBuilder hex=new StringBuilder();for(byte b:hash.digest())hex.append(String.format(Locale.US,"%02x",b&255));
             if(!MODEL_SHA1.equals(hex.toString()))throw new IOException("Intégrité du modèle incorrecte");
             if(!tmp.renameTo(dst))throw new IOException("Impossible de sauvegarder le modèle");
-        }finally{if(h.conn!=null)h.conn.disconnect();tmp.delete();}
+        }finally{tmp.delete();}
     }
-    private static class HttpsURLConnectionHolder{HttpURLConnection conn;}
     private void runAnalysis(){
         if(busy||source==null)return;
         busy=true;analyzing=true;cancelled=false;analysisProgress=-1;percent=-1;startedAt=SystemClock.elapsedRealtime();phase="Préparation du modèle";if(player!=null&&player.isPlaying())player.pause();refresh();

@@ -17,3 +17,6 @@ Qwen activé à partir d'Android 8 ; Whisper conservé sur Android 5 à 7. Tests
 
 ## v1.15.2
 UVR MDX-NET Voc_FT (66,762,795 octets) via l'API C officielle sherpa-onnx v1.13.7, téléchargé avec contrôle SHA-256. Isolation locale stéréo à 16 kHz par fenêtres avec contexte, utilisée uniquement pour l'analyse, pas dans l'export. En cas d'échec, le mix est utilisé et l'erreur est signalée. Qwen 0.6B et Whisper sont conservés. La qualité et l'alignement réel du chant nécessitent des essais sur appareil; pas d'alignement forcé mot à mot ni de modèle 1.7B dans cette version.
+
+## v1.15.3 — distribution entièrement hors ligne
+Les trois poids (Qwen 0.6B, UVR et Whisper Turbo) sont inclus dans l'APK de production, vérifiés par SHA-256 lors de la compilation. Pas de téléchargement runtime ni dialogue d'installation réseau. Le premier usage prépare les fichiers dans le stockage privé de l'app. L'APK debug de CI reste léger; l'APK Release est complet. Le contrôle CI interdit de publier si un poids manque ou si l'APK dépasse la limite GitHub de 2 GiB. L'installation de cet APK volumineux sur téléphone reste à vérifier.

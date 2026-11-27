@@ -7,7 +7,6 @@ import java.util.*;
 final class UvrLocal {
     static { System.loadLibrary("chkwhisper"); }
     private static final String SHA="e411182ce2c53541fefdcc99a8f46f2fe03978eb22038b9497c1d9d95a00fad4";
-    private static final String URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/UVR-MDX-NET-Voc_FT.onnx";
     static native boolean available();
     private static native long create(String path,int threads);
     private static native float[] process(long handle,float[] stereo);
@@ -17,20 +16,19 @@ final class UvrLocal {
     static boolean ready(Context c){return new File(c.getFilesDir(),"UVR-MDX-NET-Voc_FT.onnx").length()==66762795L;}
     private static File ensure(Context c,Listener l)throws Exception{
         File model=new File(c.getFilesDir(),"UVR-MDX-NET-Voc_FT.onnx");if(ready(c))return model;
-        File part=File.createTempFile("uvr-",".part",c.getFilesDir());HttpURLConnection conn=null;
+        File part=File.createTempFile("uvr-",".part",c.getFilesDir());
         try{
-            conn=(HttpURLConnection)new URL(URL).openConnection();conn.setConnectTimeout(20000);conn.setReadTimeout(45000);
-            if(conn.getResponseCode()!=200)throw new IOException("UVR : HTTP "+conn.getResponseCode());
+            l.status("Préparation locale du modèle UVR inclus…");
             MessageDigest md=MessageDigest.getInstance("SHA-256");long total=0,last=0;
-            try(InputStream in=conn.getInputStream();OutputStream out=new BufferedOutputStream(new FileOutputStream(part))){
-                byte[] b=new byte[65536];int k;while((k=in.read(b))!=-1){check(l);total+=k;if(total>66762795L)throw new IOException("Taille UVR incorrecte");md.update(b,0,k);out.write(b,0,k);if(total-last>=2000000){last=total;l.status("Téléchargement UVR : "+total/1000000+" / 67 Mo");}}
+            try(InputStream in=c.getAssets().open("models/UVR-MDX-NET-Voc_FT.onnx");OutputStream out=new BufferedOutputStream(new FileOutputStream(part))){
+                byte[] b=new byte[65536];int k;while((k=in.read(b))!=-1){check(l);total+=k;if(total>66762795L)throw new IOException("Taille UVR incorrecte");md.update(b,0,k);out.write(b,0,k);if(total-last>=2000000){last=total;l.status("Préparation locale UVR : "+total/1000000+" / 67 Mo");}}
             }
             StringBuilder hash=new StringBuilder();for(byte b:md.digest())hash.append(String.format(Locale.US,"%02x",b&255));
             if(total!=66762795L||!SHA.equals(hash.toString()))throw new IOException("Intégrité UVR incorrecte");
             if(model.exists()&&!model.delete())throw new IOException("Ancien modèle UVR inaccessible");
             if(!part.renameTo(model))throw new IOException("Installation UVR impossible");
             return model;
-        }finally{if(conn!=null)conn.disconnect();part.delete();}
+        }finally{part.delete();}
     }
     static float[] vocals(Context c,float[] stereo,int threads,Listener l)throws Exception{
         if(!available())throw new IOException("Bibliothèque UVR indisponible");check(l);

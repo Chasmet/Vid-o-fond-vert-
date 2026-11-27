@@ -18,7 +18,6 @@ import java.util.*;
 
 final class QwenLocal {
     private static final String ARCHIVE="sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25";
-    private static final String URL06="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"+ARCHIVE+".tar.bz2";
     private static final String SHA06="393f8a14e2f5fb96746aaab342997a40641001fbd5bf9592a080a8329178ee96";
     private static final String[] REQUIRED={"conv_frontend.onnx","encoder.int8.onnx","decoder.int8.onnx","tokenizer/merges.txt","tokenizer/tokenizer_config.json","tokenizer/vocab.json"};
     interface Listener { void status(String text); void progress(int percent); boolean abort(); }
@@ -34,24 +33,13 @@ final class QwenLocal {
     static void ensure(Context c,Listener l)throws Exception{
         if(!supported())throw new IOException("Qwen nécessite Android 8 ou plus récent. Utilise Whisper.");
         if(ready(c))return;
-        if(c.getFilesDir().getUsableSpace()<2200000000L)throw new IOException("Prévois au moins 2,2 Go libres pour installer Qwen.");
-        File dest=folder(c), stage=new File(c.getFilesDir(),"qwen3-asr-06-install"), archive=new File(c.getFilesDir(),"qwen3-asr-06.part");
+        if(c.getFilesDir().getUsableSpace()<1300000000L)throw new IOException("Libère au moins 1,3 Go pour préparer les modèles Qwen inclus dans l’APK.");
+        File dest=folder(c), stage=new File(c.getFilesDir(),"qwen3-asr-06-install");
         delete(stage); if(!stage.mkdirs())throw new IOException("Dossier modèle indisponible");
-        HttpURLConnection conn=null;
         try{
-            conn=(HttpURLConnection)new URL(URL06).openConnection();conn.setConnectTimeout(20000);conn.setReadTimeout(45000);
-            if(conn.getResponseCode()!=200)throw new IOException("Téléchargement Qwen : HTTP "+conn.getResponseCode());
-            MessageDigest hash=MessageDigest.getInstance("SHA-256");long total=0,last=0;
-            try(InputStream in=conn.getInputStream();OutputStream out=new BufferedOutputStream(new FileOutputStream(archive))){
-                byte[] buf=new byte[65536];int count;
-                while((count=in.read(buf))!=-1){check(l);total+=count;if(total>900000000L)throw new IOException("Archive trop grande");out.write(buf,0,count);hash.update(buf,0,count);
-                    if(total-last>4000000L){last=total;l.status("Qwen : "+total/1000000+" / 879 Mo téléchargés");}}
-            }
-            StringBuilder h=new StringBuilder();for(byte b:hash.digest())h.append(String.format(Locale.US,"%02x",b&255));
-            if(!SHA06.equals(h.toString()))throw new IOException("Archive Qwen : intégrité incorrecte");
-            l.status("Installation des fichiers Qwen…");
-            Set<String> allowed=new HashSet<>(Arrays.asList(REQUIRED));long unpacked=0;
-            try(TarArchiveInputStream tar=new TarArchiveInputStream(new BZip2CompressorInputStream(new BufferedInputStream(new FileInputStream(archive))))){
+            l.status("Préparation locale de Qwen inclus dans l’application…");
+            Set<String> allowed=new HashSet<>(Arrays.asList(REQUIRED));long unpacked=0,last=0;
+            try(TarArchiveInputStream tar=new TarArchiveInputStream(new BZip2CompressorInputStream(new BufferedInputStream(c.getAssets().open("models/"+ARCHIVE+".tar.bz2"))))){
                 TarArchiveEntry entry;byte[] buf=new byte[65536];
                 while((entry=tar.getNextTarEntry())!=null){
                     check(l);String name=entry.getName();while(name.startsWith("./"))name=name.substring(2);
@@ -59,14 +47,14 @@ final class QwenLocal {
                     if(!entry.isFile()||!allowed.contains(name))continue;
                     File outFile=new File(stage,name);File parent=outFile.getParentFile();if(!parent.isDirectory()&&!parent.mkdirs())throw new IOException("Dossier modèle inaccessible");
                     try(OutputStream out=new BufferedOutputStream(new FileOutputStream(outFile))){
-                        int count;while((count=tar.read(buf))!=-1){check(l);unpacked+=count;if(unpacked>1300000000L)throw new IOException("Modèle décompressé trop grand");out.write(buf,0,count);}
+                        int count;while((count=tar.read(buf))!=-1){check(l);unpacked+=count;if(unpacked>1300000000L)throw new IOException("Modèle décompressé trop grand");out.write(buf,0,count);if(unpacked-last>=16000000L){last=unpacked;l.status("Préparation locale Qwen : "+unpacked/1000000+" Mo");}}
                     }
                 }
             }
             for(String name:REQUIRED){File m=new File(stage,name);if(!m.isFile()||m.length()==0)throw new IOException("Composant Qwen manquant : "+name);}
             try(FileOutputStream out=new FileOutputStream(new File(stage,".verified"))){out.write(SHA06.getBytes("UTF-8"));}
             delete(dest);if(!stage.renameTo(dest))throw new IOException("Impossible de finaliser Qwen");
-        }finally{if(conn!=null)conn.disconnect();archive.delete();delete(stage);}
+        }finally{delete(stage);}
     }
     static String[] transcribe(Context c,float[] pcm,int threads,Listener l)throws Exception{
         ensure(c,l);check(l);File d=folder(c);
