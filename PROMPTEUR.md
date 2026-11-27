@@ -14,3 +14,6 @@ Qwen3-ASR 0.6B INT8 via Sherpa-ONNX Android v1.13.7 officiel. Archive modèle t�
 
 ## 1.15.1
 Qwen activé à partir d'Android 8 ; Whisper conservé sur Android 5 à 7. Tests de chargement JNI sur les systèmes compatibles. Le runtime officiel échoue sur API 23 (symbole __write_chk absent).
+
+## v1.15.2
+UVR MDX-NET Voc_FT (66,762,795 octets) via l'API C officielle sherpa-onnx v1.13.7, téléchargé avec contrôle SHA-256. Isolation locale stéréo à 16 kHz par fenêtres avec contexte, utilisée uniquement pour l'analyse, pas dans l'export. En cas d'échec, le mix est utilisé et l'erreur est signalée. Qwen 0.6B et Whisper sont conservés. La qualité et l'alignement réel du chant nécessitent des essais sur appareil; pas d'alignement forcé mot à mot ni de modèle 1.7B dans cette version.

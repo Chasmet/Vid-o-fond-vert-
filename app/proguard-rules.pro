@@ -10,3 +10,5 @@
 -keepclassmembers class * implements com.chasmet.fondvertstudio.LocalWhisper$Progress { public boolean shouldAbort(); }
 
 -keep class com.k2fsa.sherpa.onnx.** { *; }
+
+-keep class com.chasmet.fondvertstudio.UvrLocal { *; }

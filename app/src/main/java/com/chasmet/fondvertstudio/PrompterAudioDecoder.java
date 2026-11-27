@@ -7,7 +7,9 @@ import java.io.*;
 import java.util.Arrays;
 
 final class PrompterAudioDecoder {
-    private float[] samples=new float[16000*30];
+    private final int outputChannels;
+    private float[] samples;
+    private PrompterAudioDecoder(int channels){outputChannels=channels;samples=new float[16000*30*channels];}
     private int size=0;
     private long phase=0;
     private void append(ByteBuffer b,int channels,int rate,int encoding) throws IOException {
@@ -16,18 +18,24 @@ final class PrompterAudioDecoder {
         if(encoding!=2 && encoding!=3 && encoding!=4) throw new IOException("Format PCM non pris en charge");
         if(rate<=0||channels<=0) throw new IOException("Format audio invalide");
         while(b.remaining()>=channels*bytes){
-            float v=0;
-            for(int i=0;i<channels;i++) v+=encoding==4?b.getFloat():encoding==3?((b.get()&255)-128)/128f:b.getShort()/32768f;
+            float v=0,left=0,right=0;
+            for(int i=0;i<channels;i++){float s=encoding==4?b.getFloat():encoding==3?((b.get()&255)-128)/128f:b.getShort()/32768f;if(Float.isNaN(s)||Float.isInfinite(s))s=0;v+=s;if(i==0)left=s;if(i==1)right=s;}
+            if(channels==1)right=left;
             phase+=16000;
             while(phase>=rate){
-                if(size>=16000*60*15) throw new IOException("Durée maximale : 15 minutes");
-                if(size==samples.length) samples=Arrays.copyOf(samples,Math.min(samples.length*2,16000*60*15));
-                samples[size++]=v/channels;phase-=rate;
+                int max=16000*60*15*outputChannels;
+                if(size+outputChannels>max) throw new IOException("Durée maximale : 15 minutes");
+                if(size+outputChannels>samples.length) samples=Arrays.copyOf(samples,Math.min(samples.length*2,max));
+                if(outputChannels==2){samples[size++]=left;samples[size++]=right;}else samples[size++]=v/channels;phase-=rate;
             }
         }
     }
     static float[] decode(Context c,Uri uri) throws Exception {
-        PrompterAudioDecoder d=new PrompterAudioDecoder();
+        return decodeChannels(c,uri,1);
+    }
+    static float[] decodeStereo(Context c,Uri uri)throws Exception{return decodeChannels(c,uri,2);}
+    private static float[] decodeChannels(Context c,Uri uri,int outputChannels)throws Exception{
+        PrompterAudioDecoder d=new PrompterAudioDecoder(outputChannels);
         MediaExtractor ex=new MediaExtractor();
         MediaCodec codec=null;
         try{

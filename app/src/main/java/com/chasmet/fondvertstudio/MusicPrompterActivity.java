@@ -24,6 +24,9 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private volatile boolean cancelled,dead;
     private boolean analyzing;
     private boolean useQwen=true;
+    private CheckBox isolateVoice;
+    private boolean separationUsed;
+    private String separationNote="";
     private android.widget.RadioGroup engineChoice;
     private String phase="";
     private int analysisProgress=-1;
@@ -67,6 +70,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         vocalInfo=label("Source de transcription : morceau original",13,0xffb4bbc3);
         pickVocal=button("Importer voix studio seule (facultatif)",()->choose(3));
         clearVocal=button("Analyser le morceau original",()->{if(busy)return;vocal=null;vocalPlayable=null;save();refresh();});
+        isolateVoice=new CheckBox(this);isolateVoice.setText("Isoler automatiquement la voix (UVR · 67 Mo)");isolateVoice.setTextColor(0xffffffff);isolateVoice.setChecked(QwenLocal.supported()&&getSharedPreferences("music_prompter",0).getBoolean("isolate_voice",true));root.addView(isolateVoice);isolateVoice.setOnCheckedChangeListener((v,checked)->getSharedPreferences("music_prompter",0).edit().putBoolean("isolate_voice",checked).apply());
         label("Moteur de transcription",16,0xffffffff);
         engineChoice=new android.widget.RadioGroup(this);engineChoice.setOrientation(LinearLayout.VERTICAL);
         android.widget.RadioButton q=new android.widget.RadioButton(this);q.setId(View.generateViewId());q.setText(QwenLocal.supported()?"Qwen3-ASR 0.6B · chant / musique":"Qwen3-ASR · Android 8 minimum");q.setTextColor(0xffffffff);engineChoice.addView(q);
@@ -149,7 +153,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         }).show();
     }
     private File model(){return new File(getFilesDir(),"ggml-large-v3-turbo-q5_0.bin");}
-    private void confirmAnalysis(){if(source==null||busy)return;if(!QwenLocal.supported())useQwen=false;if(useQwen){if(QwenLocal.ready(this))runAnalysis();else new AlertDialog.Builder(this).setTitle("Installer Qwen3-ASR local").setMessage("Téléchargement unique : 879 Mo. Prévois 2,2 Go libres pour l’installation. Aucun audio envoyé. Les horaires sont approximatifs par passages de huit secondes.").setNegativeButton("Annuler",null).setPositiveButton("Télécharger et analyser",(d,w)->runAnalysis()).show();return;}if(!model().isFile()||model().length()<MODEL_MIN_BYTES){new AlertDialog.Builder(this).setTitle("Télécharger le modèle local").setMessage("Nouveau modèle Large V3 Turbo : environ 574 Mo. Téléchargement unique, puis transcription sans Internet. Le téléphone peut chauffer pendant l’analyse.").setNegativeButton("Annuler",null).setPositiveButton("Télécharger et analyser",(d,w)->runAnalysis()).show();}else runAnalysis();}
+    private void confirmAnalysis(){if(source==null||busy)return;if(!QwenLocal.supported())useQwen=false;if(useQwen){if(QwenLocal.ready(this))runAnalysis();else new AlertDialog.Builder(this).setTitle("Installer Qwen3-ASR local").setMessage("Téléchargement unique : 879 Mo. Prévois 2,2 Go libres pour l’installation. Aucun audio envoyé. Si la séparation UVR est activée, 67 Mo supplémentaires seront téléchargés. Les horaires restent approximatifs.").setNegativeButton("Annuler",null).setPositiveButton("Télécharger et analyser",(d,w)->runAnalysis()).show();return;}if(!model().isFile()||model().length()<MODEL_MIN_BYTES){new AlertDialog.Builder(this).setTitle("Télécharger le modèle local").setMessage("Nouveau modèle Large V3 Turbo : environ 574 Mo. Téléchargement unique, puis transcription sans Internet. Le téléphone peut chauffer pendant l’analyse. UVR nécessite 67 Mo supplémentaires si activé.").setNegativeButton("Annuler",null).setPositiveButton("Télécharger et analyser",(d,w)->runAnalysis()).show();}else runAnalysis();}
     private void message(String s){ui.post(()->{if(!dead){if(analyzing){phase=s;analysisProgress=-1;}status.setText(s);}});}
     private void reportProgress(int value){ui.post(()->{if(dead||!analyzing||cancelled)return;analysisProgress=Math.max(analysisProgress,Math.min(100,Math.max(0,value)));phase=useQwen?"Transcription Qwen3-ASR":"Transcription Large V3 Turbo";progress.setIndeterminate(analysisProgress==0);if(analysisProgress>0)progress.setProgress(analysisProgress);});}
     private void ensureModel() throws Exception {
@@ -175,12 +179,27 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         if(busy||source==null)return;
         busy=true;analyzing=true;cancelled=false;analysisProgress=-1;percent=-1;startedAt=SystemClock.elapsedRealtime();phase="Préparation du modèle";if(player!=null&&player.isPlaying())player.pause();refresh();
         Uri input=vocalPlayable!=null?vocalPlayable:(vocal!=null?vocal:music());
+        final boolean separate=QwenLocal.supported()&&vocal==null&&isolateVoice.isChecked();separationUsed=false;separationNote="";
         worker.execute(()->{
             try{
                 if(useQwen)QwenLocal.ensure(this,new QwenLocal.Listener(){public void status(String s){message(s);}public void progress(int v){reportProgress(v);}public boolean abort(){return cancelled||dead;}});else ensureModel();
                 if(cancelled)throw new InterruptedException();
                 message("Décodage de la piste audio…");
-                float[] pcm=PrompterAudioDecoder.decode(this,input);
+                float[] pcm;
+                if(separate){
+                    try{
+                        message("Décodage stéréo pour UVR…");
+                        pcm=UvrLocal.vocals(this,PrompterAudioDecoder.decodeStereo(this,input),Math.max(1,Runtime.getRuntime().availableProcessors()-1),new UvrLocal.Listener(){
+                            public void status(String s){message(s);}
+                            public boolean abort(){return cancelled||dead;}
+                        });
+                        separationUsed=true;
+                    }catch(InterruptedException e){throw e;}catch(Exception|LinkageError|OutOfMemoryError e){
+                        separationNote=" · UVR non utilisé : "+(e.getMessage()==null?"ressources insuffisantes":e.getMessage());
+                        message("UVR indisponible : analyse du mix original");
+                        pcm=PrompterAudioDecoder.decode(this,input);
+                    }
+                }else pcm=PrompterAudioDecoder.decode(this,input);
                 if(cancelled)throw new InterruptedException();
                 // Normalize only the analysis copy. The original music remains untouched.
                 float peak=0f;for(float sample:pcm)if(!Float.isNaN(sample)&&!Float.isInfinite(sample))peak=Math.max(peak,Math.abs(sample));
@@ -197,7 +216,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
                 ArrayList<Line> found=new ArrayList<>();
                 for(int k=0;k+2<result.length;k+=3){String text=result[k+2].trim();long from=Long.parseLong(result[k]),to=Long.parseLong(result[k+1]);if(!text.isEmpty()&&to>from)found.add(new Line(from,to,text));}
                 if(found.isEmpty())throw new IOException("Aucune parole exploitable détectée");
-                ui.post(()->{if(dead)return;lines.clear();lines.addAll(found);save();busy=false;analyzing=false;status.setText(lines.size()+" passages détectés · "+(useQwen?"horaires approximatifs, à corriger":"vérifie les paroles"));refresh();prepare(music());});
+                ui.post(()->{if(dead)return;lines.clear();lines.addAll(found);save();busy=false;analyzing=false;status.setText(lines.size()+" passages détectés · "+(useQwen?"horaires approximatifs, à corriger":"vérifie les paroles")+(separationUsed?" · voix isolée":separationNote));refresh();prepare(music());});
             }catch(Exception|LinkageError|OutOfMemoryError e){ui.post(()->{if(dead)return;busy=false;analyzing=false;status.setText(cancelled?"Transcription annulée · anciennes paroles conservées":"Analyse impossible : "+(e instanceof OutOfMemoryError?"mémoire insuffisante pour ce modèle":e.getMessage()));refresh();});}
         });
     }
@@ -207,7 +226,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private void render(long t){clock.setText(duration(t)+" / "+duration(player==null?0:player.getDuration()));long at=t+lead;active=-1;for(int i=0;i<lines.size();i++){if(lines.get(i).start<=at)active=i;else break;}current.setText(active<0?"Prépare-toi…":lines.get(active).text);next.setText(active+1<lines.size()?lines.get(active+1).text:"");}
     private void editLines(){if(lines.isEmpty())return;String[] choices=new String[lines.size()];for(int i=0;i<lines.size();i++)choices[i]=String.format(Locale.FRANCE,"%.2f s · %s",lines.get(i).start/1000f,lines.get(i).text);new AlertDialog.Builder(this).setTitle("Choisir un passage").setItems(choices,(d,i)->editLine(i)).setNegativeButton("Fermer",null).show();}
     private void editLine(int i){Line l=lines.get(i);LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(24,12,24,12);EditText time=new EditText(this),words=new EditText(this);time.setHint("Début en secondes");time.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);time.setText(String.format(Locale.US,"%.2f",l.start/1000f));words.setText(l.text);box.addView(time);box.addView(words);new AlertDialog.Builder(this).setTitle("Corriger le passage").setView(box).setNegativeButton("Annuler",null).setPositiveButton("Enregistrer",(d,w)->{try{long v=Math.round(Double.parseDouble(time.getText().toString().replace(',','.'))*1000);if(v<0||v>900000)throw new Exception();l.start=v;l.text=words.getText().toString().trim();Collections.sort(lines,(a,b)->Long.compare(a.start,b.start));save();}catch(Exception e){status.setText("Horaire invalide");}}).show();}
-    private void refresh(){engineChoice.setEnabled(!busy);for(int i=0;i<engineChoice.getChildCount();i++)engineChoice.getChildAt(i).setEnabled(!busy&&(i!=0||QwenLocal.supported()));pick.setEnabled(!busy);pickBacking.setEnabled(!busy);pickVocal.setEnabled(!busy&&source!=null);clearVocal.setEnabled(!busy&&vocal!=null);cancelAnalysis.setVisibility(analyzing?View.VISIBLE:View.GONE);cancelAnalysis.setEnabled(analyzing&&!cancelled);vocalInfo.setText(vocal==null?"Source de transcription : morceau original":"Voix pour analyse : "+fileName(vocal));analyze.setEnabled(!busy&&source!=null);play.setEnabled(!busy&&source!=null);edit.setEnabled(!busy&&!lines.isEmpty());camera.setEnabled(!busy&&!lines.isEmpty()&&source!=null);progress.setVisibility(busy?View.VISIBLE:View.GONE);if(busy){progress.setIndeterminate(percent<0);if(percent>=0)progress.setProgress(percent);}fileInfo.setText(source==null?"Aucun morceau importé":"MORCEAU IMPORTÉ\n"+fileName(source)+(prepared&&player!=null?" · "+duration(player.getDuration()):""));backingInfo.setText("Instrumental : "+(backing==null?"aucun":fileName(backing)));}
+    private void refresh(){isolateVoice.setEnabled(!busy&&vocal==null&&QwenLocal.supported());engineChoice.setEnabled(!busy);for(int i=0;i<engineChoice.getChildCount();i++)engineChoice.getChildAt(i).setEnabled(!busy&&(i!=0||QwenLocal.supported()));pick.setEnabled(!busy);pickBacking.setEnabled(!busy);pickVocal.setEnabled(!busy&&source!=null);clearVocal.setEnabled(!busy&&vocal!=null);cancelAnalysis.setVisibility(analyzing?View.VISIBLE:View.GONE);cancelAnalysis.setEnabled(analyzing&&!cancelled);vocalInfo.setText(vocal==null?"Source de transcription : morceau original":"Voix pour analyse : "+fileName(vocal));analyze.setEnabled(!busy&&source!=null);play.setEnabled(!busy&&source!=null);edit.setEnabled(!busy&&!lines.isEmpty());camera.setEnabled(!busy&&!lines.isEmpty()&&source!=null);progress.setVisibility(busy?View.VISIBLE:View.GONE);if(busy){progress.setIndeterminate(percent<0);if(percent>=0)progress.setProgress(percent);}fileInfo.setText(source==null?"Aucun morceau importé":"MORCEAU IMPORTÉ\n"+fileName(source)+(prepared&&player!=null?" · "+duration(player.getDuration()):""));backingInfo.setText("Instrumental : "+(backing==null?"aucun":fileName(backing)));}
     private void save(){try{JSONObject o=new JSONObject();o.put("source",source==null?"":source.toString());o.put("backing",backing==null?"":backing.toString());o.put("lead",lead);o.put("vocal",vocal==null?"":vocal.toString());o.put("vocalPlayable",vocalPlayable==null?"":vocalPlayable.toString());o.put("playable",playable==null?"":playable.toString());o.put("backingPlayable",backingPlayable==null?"":backingPlayable.toString());JSONArray a=new JSONArray();for(Line l:lines){JSONArray x=new JSONArray();x.put(l.start);x.put(l.end);x.put(l.text);a.put(x);}o.put("lines",a);getSharedPreferences("music_prompter",0).edit().putString("project",o.toString()).apply();}catch(Exception ignored){}}
     private void load(){try{JSONObject o=new JSONObject(getSharedPreferences("music_prompter",0).getString("project","{}"));String s=o.optString("source"),b=o.optString("backing");source=s.isEmpty()?null:Uri.parse(s);backing=b.isEmpty()?null:Uri.parse(b);String pp=o.optString("playable"),bp=o.optString("backingPlayable");playable=pp.isEmpty()?null:Uri.parse(pp);backingPlayable=bp.isEmpty()?null:Uri.parse(bp);String v=o.optString("vocal"),vp=o.optString("vocalPlayable");vocal=v.isEmpty()?null:Uri.parse(v);vocalPlayable=vp.isEmpty()?null:Uri.parse(vp);lead=o.optInt("lead",1000);JSONArray a=o.optJSONArray("lines");if(a!=null)for(int i=0;i<a.length();i++){JSONArray x=a.getJSONArray(i);lines.add(new Line(x.getLong(0),x.getLong(1),x.getString(2)));}if(source!=null)prepare(music());}catch(Exception ignored){}}
     private void releasePlayer(){prepared=false;if(player!=null){player.release();player=null;}}

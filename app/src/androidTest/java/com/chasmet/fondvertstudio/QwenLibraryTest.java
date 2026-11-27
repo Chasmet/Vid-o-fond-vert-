@@ -5,6 +5,9 @@ import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public class QwenLibraryTest {
+    @Test public void loadsUvrNativeRuntime() {
+        if (QwenLocal.supported()) assertTrue(UvrLocal.available());
+    }
     @Test public void loadsOfficialAndroidRuntime() throws Exception {
         if (!QwenLocal.supported()) {
             assertTrue(android.os.Build.VERSION.SDK_INT < 26);
