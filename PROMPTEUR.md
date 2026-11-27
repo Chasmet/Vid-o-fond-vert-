@@ -3,3 +3,6 @@ Moteur MIT [whisper.cpp v1.7.6](https://github.com/ggml-org/whisper.cpp/tree/v1.
 
 ## v1.14.1
 Sélecteur tous fichiers, vérification réelle de lecture, nom et durée, WAV studio via le convertisseur AAC existant, progression native Whisper, caméra avec overlay de paroles et musique d'origine, pas d'incrustation des paroles dans le MP4. Les formats restent limités aux décodeurs disponibles sur Android; les WAV sont convertis en AAC pour la compatibilité et la durée d'analyse est limitée à 15 min. La caméra réutilise le flux d'export classique.
+
+## v1.14.2
+Le tournage prompteur utilise exclusivement la chanson importée (instrumental réservé à l'entraînement). Pas de microphone, pas de texte incrusté. En cas d'échec audio, aucune vidéo silencieuse n'est publiée : la prise est conservée et une nouvelle tentative est proposée. Le test instrumenté vérifie une seule piste audio importée et une piste vidéo. Les paroles suivent l'horloge de lecture du morceau.

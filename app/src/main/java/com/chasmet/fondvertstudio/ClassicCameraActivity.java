@@ -241,7 +241,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
         audioPlusButton.setEnabled(false);
         audioStatus.setText(CaptureFormat.label(horizontalFormat)
                 + " · MICRO COUPÉ · IMPORTE UNE MUSIQUE");
-        if(getIntent().getBooleanExtra("music_prompter_camera",false)&&getIntent().getData()!=null){
+        if(getIntent().getBooleanExtra("music_prompter_camera",false)&&getIntent().getStringExtra("music_prompter_uri")!=null){
             prompterMode=true;
             try{
                 org.json.JSONObject project=new org.json.JSONObject(getSharedPreferences("music_prompter",0).getString("project","{}"));
@@ -263,7 +263,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
             renderPrompter(0);
             importAudioButton.setText("PROMPTEUR");
             importAudioButton.setOnClickListener(v->Toast.makeText(this,"Retour au prompteur pour changer de morceau",Toast.LENGTH_SHORT).show());
-            loadMusic(getIntent().getData());
+            loadMusic(Uri.parse(getIntent().getStringExtra("music_prompter_uri")));
             audioStartEdited=true;
             String name=getIntent().getStringExtra("music_prompter_name");if(name!=null)audioName.setText(name);
         }
@@ -543,6 +543,10 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     private void finalizeWithImportedAudio(File videoOnly, long durationMs, int cameraError) {
         recordButton.setEnabled(false);
         recordButton.setText("AJOUT AUDIO…");
+        final Uri exportMusic = preparedMusicUri;
+        final Uri fallbackMusic = musicUri;
+        final int exportStartMs = audioStartMs;
+        final boolean requireMusic = prompterMode;
         File ready = new File(getCacheDir(),
                 "classic_ready_" + System.currentTimeMillis() + ".mp4");
 
@@ -553,28 +557,53 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                 MuxerUtils.addAudio(
                         this,
                         videoOnly,
-                        preparedMusicUri,
+                        exportMusic,
                         ready,
                         Math.max(1L, durationMs) * 1000L,
-                        Math.max(0L, audioStartMs) * 1000L);
+                        Math.max(0L, exportStartMs) * 1000L);
                 audioOk = MuxerUtils.hasAudioTrack(ready);
             } catch (Exception error) {
                 firstError = error;
             }
 
-            if (!audioOk && musicUri != null) {
+            if (!audioOk && fallbackMusic != null) {
                 try {
                     if (ready.exists()) ready.delete();
                     MuxerUtils.addAudio(
                             this,
                             videoOnly,
-                            musicUri,
+                            fallbackMusic,
                             ready,
                             Math.max(1L, durationMs) * 1000L,
-                            Math.max(0L, audioStartMs) * 1000L);
+                            Math.max(0L, exportStartMs) * 1000L);
                     audioOk = MuxerUtils.hasAudioTrack(ready);
                 } catch (Exception ignored) {
                 }
+            }
+
+            if (requireMusic && !audioOk) {
+                // A playback clip must never be published without its studio soundtrack.
+                // Keep the original silent camera take for recovery; do not delete it.
+                if (ready.exists()) ready.delete();
+                final Exception cause = firstError;
+                runOnUiThread(() -> {
+                    captureState = CaptureState.IDLE;
+                    restoreIdleControls();
+                    audioStatus.setText("EXPORT AUDIO ÉCHOUÉ · prise conservée");
+                    Snackbar.make(recordButton, "Musique non intégrée : aucune vidéo silencieuse exportée. Prise conservée.", Snackbar.LENGTH_INDEFINITE)
+                        .setAction("RÉESSAYER", v -> {
+                            if (activeRecording != null || captureState != CaptureState.IDLE) return;
+                            if (!java.util.Objects.equals(exportMusic, preparedMusicUri) || audioStartMs != exportStartMs) {
+                                Toast.makeText(this, "Rétablis la musique et le départ d'origine avant de réessayer.", Toast.LENGTH_LONG).show();
+                                return;
+                            }
+                            captureState = CaptureState.FINALIZING;
+                            setRecordingControls(false);
+                            finalizeWithImportedAudio(videoOnly, durationMs, cameraError);
+                        }).show();
+                    if (cause != null) android.util.Log.w("PrompterExport", "Audio export failed", cause);
+                });
+                return;
             }
 
             File sourceToSave = audioOk ? ready : videoOnly;
@@ -582,7 +611,7 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                 Uri saved = MediaStoreSaver.saveVideo(
                         this,
                         sourceToSave,
-                        "VideoClassique_" + System.currentTimeMillis() + ".mp4");
+                        (requireMusic ? "ClipPrompteur_" : "VideoClassique_") + System.currentTimeMillis() + ".mp4");
                 if (videoOnly.exists()) videoOnly.delete();
                 if (ready.exists()) ready.delete();
                 boolean finalAudioOk = audioOk;
@@ -740,7 +769,9 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     }
 
     private void updateAudioPosition(int positionMs) {
-        renderPrompter(positionMs);
+        if (prompterMode && activeRecording != null && musicPrepared && musicPlayer != null) {
+            try { renderPrompter(musicPlayer.getCurrentPosition()); } catch (IllegalStateException ignored) { renderPrompter(positionMs); }
+        } else renderPrompter(positionMs);
         int duration = musicPrepared && musicPlayer != null
                 ? musicPlayer.getDuration() : 0;
         audioStatus.setText(formatDuration(positionMs)

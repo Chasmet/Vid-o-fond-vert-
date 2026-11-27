@@ -147,6 +147,34 @@ public final class MediaPipelineInstrumentedTest {
         }
     }
 
+    @Test
+    public void playbackClipUsesOnlyOneImportedAudioTrack() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File camera = new File(context.getCacheDir(), "playback-camera.mp4");
+        File song = createPcmWav(context, "playback-song.wav", 24, 1000);
+        File aac = new File(context.getCacheDir(), "playback-song.m4a");
+        File clip = new File(context.getCacheDir(), "playback-clip.mp4");
+        android.media.MediaExtractor extractor = new android.media.MediaExtractor();
+        try {
+            createVideo(camera, Color.BLUE);
+            assertTrue(!MuxerUtils.hasAudioTrack(camera));
+            WavToAacTranscoder.transcode(context, Uri.fromFile(song), aac, 0L, 900000L);
+            MuxerUtils.addAudio(context, camera, Uri.fromFile(aac), clip, 230000L, 100000L);
+            extractor.setDataSource(clip.getAbsolutePath());
+            int audio = 0, video = 0;
+            for (int i = 0; i < extractor.getTrackCount(); i++) {
+                String mime = extractor.getTrackFormat(i).getString(android.media.MediaFormat.KEY_MIME);
+                if (mime != null && mime.startsWith("audio/")) audio++;
+                if (mime != null && mime.startsWith("video/")) video++;
+            }
+            assertEquals(1, audio);
+            assertEquals(1, video);
+        } finally {
+            extractor.release();
+            camera.delete(); song.delete(); aac.delete(); clip.delete();
+        }
+    }
+
     private static void createVideo(File output, int color) throws Exception {
         createVideo(output, color, 0);
     }

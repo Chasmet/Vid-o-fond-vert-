@@ -117,12 +117,12 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private void openCamera(){
         if(busy||lines.isEmpty()||music()==null)return;
         save();
-        String[] choices=backing==null?new String[]{"Morceau original · vertical","Morceau original · horizontal"}:new String[]{"Morceau original · vertical","Morceau original · horizontal","Instrumental · vertical","Instrumental · horizontal"};
+        String[] choices=new String[]{"Morceau original · vertical 9:16","Morceau original · horizontal 16:9"};
         new AlertDialog.Builder(this).setTitle("Musique et format de la caméra").setItems(choices,(d,i)->{
             Intent intent=new Intent(this,ClassicCameraActivity.class);
             intent.putExtra("music_prompter_camera",true);
-            intent.putExtra("music_prompter_name",fileName(i>=2?backing:source));
-            intent.setData(i>=2?instrumental():music());
+            intent.putExtra("music_prompter_name",fileName(source));
+            intent.putExtra("music_prompter_uri",music().toString());
             intent.putExtra(CaptureFormat.EXTRA_FORMAT,i%2==0?CaptureFormat.VERTICAL:CaptureFormat.HORIZONTAL);
             startActivity(intent);
         }).show();
