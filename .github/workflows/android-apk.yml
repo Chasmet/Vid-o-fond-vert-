@@ -219,6 +219,19 @@ jobs:
           "$APKSIGNER" verify --verbose app/build/outputs/apk/release/app-release.apk
           echo "APK propre et signé : CameraX + ML Kit uniquement pour le détourage"
 
+      - name: Vérifier la continuité de la signature avec la Release publique
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/reference-apk"
+          gh release download v1.12.8 --pattern 'Fond-Vert-Studio-v1.12.8.apk' --dir "$RUNNER_TEMP/reference-apk"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          OLD=$("$APKSIGNER" verify --print-certs "$RUNNER_TEMP/reference-apk/Fond-Vert-Studio-v1.12.8.apk" | grep 'certificate SHA-256 digest:')
+          NEW=$("$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep 'certificate SHA-256 digest:')
+          test -n "$OLD"
+          test "$OLD" = "$NEW"
+
       - name: Préparer les fichiers distribués
         shell: bash
         run: |
