@@ -156,7 +156,7 @@ final class WavToAacTranscoder {
         }
     }
 
-    private static WavInfo parseFormat(byte[] fmt) throws IOException {
+    static WavInfo parseFormat(byte[] fmt) throws IOException {
         int format = uint16le(fmt, 0);
         int channels = uint16le(fmt, 2);
         int sampleRate = (int) uint32le(fmt, 4);
@@ -504,7 +504,7 @@ final class WavToAacTranscoder {
         return a * b;
     }
 
-    private static final class WavInfo {
+    static final class WavInfo {
         int format;
         int channels;
         int outputChannels;

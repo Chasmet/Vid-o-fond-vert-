@@ -18,10 +18,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Assemble les prises caméra indépendantes de la timeline en un seul MP4.
- * Le fichier reste dans le cache : seule l'Activity peut ensuite le sauvegarder dans la galerie.
+ * Deuxième passe de rendu Fond vert. Elle ne s'exécute que si le rendu temps réel échoue
+ * ou lorsqu'un projet sauvegardé est repris après la fermeture de l'application.
  */
-public final class ClipTimelineExportWorker extends Worker {
+public final class VideoRendererWorker extends Worker {
     public static final String KEY_SOURCE_TIMELINE_PATH = "source_timeline_path";
     public static final String KEY_TRANSFORM_PATH = "transform_path";
     public static final String KEY_EXTERNAL_AUDIO_URI = "external_audio_uri";
@@ -29,6 +29,7 @@ public final class ClipTimelineExportWorker extends Worker {
     public static final String KEY_THRESHOLD = "threshold";
     public static final String KEY_SOFTNESS = "softness";
     public static final String KEY_QUALITY = "quality";
+    public static final String KEY_HORIZONTAL_FORMAT = "horizontal_format";
     public static final String KEY_MIRROR_SOURCE = "mirror_source";
     public static final String KEY_TRANSFORM_SCALE = "transform_scale";
     public static final String KEY_TRANSFORM_CENTER_X = "transform_center_x";
@@ -39,8 +40,8 @@ public final class ClipTimelineExportWorker extends Worker {
 
     private static final int SOURCE_BATCH_SIZE = 8;
 
-    public ClipTimelineExportWorker(@NonNull Context appContext,
-                                    @NonNull WorkerParameters workerParams) {
+    public VideoRendererWorker(@NonNull Context appContext,
+                               @NonNull WorkerParameters workerParams) {
         super(appContext, workerParams);
     }
 
@@ -68,6 +69,8 @@ public final class ClipTimelineExportWorker extends Worker {
         float threshold = getInputData().getFloat(KEY_THRESHOLD, 0.50f);
         float softness = getInputData().getFloat(KEY_SOFTNESS, 0.065f);
         int quality = getInputData().getInt(KEY_QUALITY, 1080);
+        boolean horizontalOutput = getInputData().getBoolean(
+                KEY_HORIZONTAL_FORMAT, false);
         boolean mirrorSource = getInputData().getBoolean(KEY_MIRROR_SOURCE, false);
 
         String transformPath = getInputData().getString(KEY_TRANSFORM_PATH);
@@ -102,13 +105,8 @@ public final class ClipTimelineExportWorker extends Worker {
         try {
             setProgressAsync(new Data.Builder().putInt(KEY_PROGRESS, 1).build());
             ArrayList<SourceInfo> infos = inspectSources(sourceTimeline);
-            SourceInfo first = infos.get(0);
-            int maxWidth = first.width >= first.height ? quality * 16 / 9 : quality;
-            int maxHeight = first.width >= first.height ? quality : quality * 16 / 9;
-            int[] outputSize = BitmapUtils.fitInside(first.width, first.height,
-                    maxWidth, maxHeight);
-            int outputWidth = outputSize[0];
-            int outputHeight = outputSize[1];
+            int outputWidth = CaptureFormat.videoWidth(horizontalOutput, quality);
+            int outputHeight = CaptureFormat.videoHeight(horizontalOutput, quality);
             int frameRate = 30;
 
             long totalFrames = 0L;
@@ -196,10 +194,6 @@ public final class ClipTimelineExportWorker extends Worker {
             if (!keepFinal && finalVideo.exists()) finalVideo.delete();
             if (transformFile != null && transformFile.exists()) transformFile.delete();
             if (sourceTimelineFile.exists()) sourceTimelineFile.delete();
-            for (ClipSourceTimeline.Segment segment : sourceTimeline.segments()) {
-                File source = new File(segment.sourcePath);
-                if (source.exists()) source.delete();
-            }
         }
     }
 

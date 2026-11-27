@@ -103,7 +103,7 @@
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/classicAudioCard"
         android:layout_width="0dp"
-        android:layout_height="156dp"
+        android:layout_height="210dp"
         android:layout_marginStart="10dp"
         android:layout_marginEnd="10dp"
         android:layout_marginBottom="10dp"
@@ -163,12 +163,11 @@
                 android:textColor="@android:color/white"
                 android:textSize="9sp" />
 
-            <SeekBar
-                android:id="@+id/classicMusicSeekBar"
+            <com.chasmet.fondvertstudio.AudioTimelineView
+                android:id="@+id/classicAudioTimeline"
                 android:layout_width="match_parent"
-                android:layout_height="32dp"
-                android:max="1000"
-                android:progress="0" />
+                android:layout_height="88dp"
+                android:layout_marginTop="2dp" />
 
             <LinearLayout
                 android:layout_width="match_parent"

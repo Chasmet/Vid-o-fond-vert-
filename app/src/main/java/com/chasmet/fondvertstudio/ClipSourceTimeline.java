@@ -57,6 +57,11 @@ final class ClipSourceTimeline {
         if (segment != null) segments.add(segment);
     }
 
+    void replaceWith(ClipSourceTimeline other) {
+        segments.clear();
+        if (other != null) segments.addAll(other.segments);
+    }
+
     boolean isEmpty() {
         return segments.isEmpty();
     }

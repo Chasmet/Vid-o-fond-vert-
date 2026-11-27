@@ -354,7 +354,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/musicCard"
                     android:layout_width="match_parent"
-                    android:layout_height="174dp"
+                    android:layout_height="232dp"
                     android:layout_marginTop="5dp"
                     app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
@@ -422,12 +422,11 @@
                             android:textColor="@color/ink_secondary"
                             android:textSize="8sp" />
 
-                        <SeekBar
-                            android:id="@+id/musicSeekBar"
+                        <com.chasmet.fondvertstudio.AudioTimelineView
+                            android:id="@+id/audioTimeline"
                             android:layout_width="match_parent"
-                            android:layout_height="30dp"
-                            android:max="1000"
-                            android:progress="0" />
+                            android:layout_height="88dp"
+                            android:layout_marginTop="2dp" />
 
                         <LinearLayout
                             android:layout_width="match_parent"
