@@ -6,3 +6,6 @@ Sélecteur tous fichiers, vérification réelle de lecture, nom et durée, WAV s
 
 ## v1.14.2
 Le tournage prompteur utilise exclusivement la chanson importée (instrumental réservé à l'entraînement). Pas de microphone, pas de texte incrusté. En cas d'échec audio, aucune vidéo silencieuse n'est publiée : la prise est conservée et une nouvelle tentative est proposée. Le test instrumenté vérifie une seule piste audio importée et une piste vidéo. Les paroles suivent l'horloge de lecture du morceau.
+
+## v1.14.3
+Large V3 Turbo Q5_0, modèle officiel 547 MiB, SHA-1 e050f7970618a659205450ad97eb95a18d69c9ee. Progression réelle, chronomètre actif pendant le chargement, annulation native et piste vocale studio optionnelle (même origine temporelle que le master). Normalisation de l'audio d'analyse seulement. Pas de séparation automatique de voix; pas de garantie de précision pour le rap chanté. L'export conserve la chanson originale (AAC dans le MP4 selon compatibilité).

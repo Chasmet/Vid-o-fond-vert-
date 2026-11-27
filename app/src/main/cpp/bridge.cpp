@@ -18,15 +18,32 @@ Java_com_chasmet_fondvertstudio_LocalWhisper_transcribe(JNIEnv *env, jclass, jst
     params.print_realtime = false;
     params.print_timestamps = false;
     params.no_timestamps = false;
-    params.no_context = true;
-    struct ProgressData { JavaVM *vm; jobject object; jmethodID method; };
+    params.no_context = false;
+    params.suppress_blank = true;
+    params.greedy.best_of = 2;
+    struct ProgressData { JavaVM *vm; jobject object; jmethodID method; jmethodID abortMethod; };
     ProgressData data{};
     env->GetJavaVM(&data.vm);
     if (progress) {
         data.object = env->NewGlobalRef(progress);
         jclass type = env->GetObjectClass(progress);
         data.method = env->GetMethodID(type, "update", "(I)V");
+        data.abortMethod = env->GetMethodID(type, "shouldAbort", "()Z");
         env->DeleteLocalRef(type);
+        params.abort_callback_user_data = &data;
+        params.abort_callback = [](void *opaque) -> bool {
+            auto *d = static_cast<ProgressData *>(opaque);
+            JNIEnv *e = nullptr;
+            bool attached = false;
+            if (d->vm->GetEnv(reinterpret_cast<void **>(&e), JNI_VERSION_1_6) != JNI_OK) {
+                if (d->vm->AttachCurrentThread(&e, nullptr) != JNI_OK) return false;
+                attached = true;
+            }
+            bool stop = d->abortMethod && e->CallBooleanMethod(d->object, d->abortMethod) == JNI_TRUE;
+            if (e->ExceptionCheck()) e->ExceptionClear();
+            if (attached) d->vm->DetachCurrentThread();
+            return stop;
+        };
         params.progress_callback_user_data = &data;
         params.progress_callback = [](struct whisper_context *, struct whisper_state *, int value, void *opaque) {
             auto *d = static_cast<ProgressData *>(opaque);
