@@ -11,3 +11,6 @@ Le tournage prompteur utilise exclusivement la chanson importée (instrumental r
 Large V3 Turbo Q5_0, modèle officiel 547 MiB, SHA-1 e050f7970618a659205450ad97eb95a18d69c9ee. Progression réelle, chronomètre actif pendant le chargement, annulation native et piste vocale studio optionnelle (même origine temporelle que le master). Normalisation de l'audio d'analyse seulement. Pas de séparation automatique de voix; pas de garantie de précision pour le rap chanté. L'export conserve la chanson originale (AAC dans le MP4 selon compatibilité).
 ## v1.15.0
 Qwen3-ASR 0.6B INT8 via Sherpa-ONNX Android v1.13.7 officiel. Archive modèle téléchargée et vérifiée SHA-256, extraction limitée aux six composants attendus, traitement local. Choix Qwen ou Whisper Turbo, piste vocale optionnelle. Les horaires Qwen sont approximatifs par fenêtres de 8 secondes, modifiables. Le modèle 1.7B, la séparation automatique et ForcedAligner ne sont pas intégrés dans cette version. Export vidéo original et signature inchangés.
+
+## 1.15.1
+Qwen activé à partir d'Android 8 ; Whisper conservé sur Android 5 à 7. Tests de chargement JNI sur les systèmes compatibles. Le runtime officiel échoue sur API 23 (symbole __write_chk absent).

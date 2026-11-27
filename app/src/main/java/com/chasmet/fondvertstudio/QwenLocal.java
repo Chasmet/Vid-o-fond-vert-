@@ -22,6 +22,7 @@ final class QwenLocal {
     private static final String SHA06="393f8a14e2f5fb96746aaab342997a40641001fbd5bf9592a080a8329178ee96";
     private static final String[] REQUIRED={"conv_frontend.onnx","encoder.int8.onnx","decoder.int8.onnx","tokenizer/merges.txt","tokenizer/tokenizer_config.json","tokenizer/vocab.json"};
     interface Listener { void status(String text); void progress(int percent); boolean abort(); }
+    static boolean supported(){return android.os.Build.VERSION.SDK_INT>=26;}
     static File folder(Context c){return new File(c.getFilesDir(),"qwen3-asr-06-int8");}
     static boolean ready(Context c){
         File d=folder(c);if(!new File(d,".verified").isFile())return false;
@@ -31,6 +32,7 @@ final class QwenLocal {
     private static void check(Listener l)throws InterruptedException{if(l.abort()||Thread.currentThread().isInterrupted())throw new InterruptedException();}
     private static void delete(File f){if(f.isDirectory()){File[] list=f.listFiles();if(list!=null)for(File child:list)delete(child);}f.delete();}
     static void ensure(Context c,Listener l)throws Exception{
+        if(!supported())throw new IOException("Qwen nécessite Android 8 ou plus récent. Utilise Whisper.");
         if(ready(c))return;
         if(c.getFilesDir().getUsableSpace()<2200000000L)throw new IOException("Prévois au moins 2,2 Go libres pour installer Qwen.");
         File dest=folder(c), stage=new File(c.getFilesDir(),"qwen3-asr-06-install"), archive=new File(c.getFilesDir(),"qwen3-asr-06.part");
