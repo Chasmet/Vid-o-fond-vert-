@@ -32,7 +32,12 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private int analysisProgress=-1;
     private TextView fileInfo,backingInfo;
     private ProgressBar progress;
-    private Button camera;
+    private Button camera, pdfExport;
+    private TextView cameraHint;
+    private boolean cameraAfterCancel;
+    private static final int REQUEST_LYRICS_PDF=41;
+    private String pendingPdfTitle;
+    private String pendingPdfText;
     private int percent=-1;
     private long startedAt;
     private boolean prepared;
@@ -63,6 +68,10 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         status=label("Modèles inclus · fonctionnement hors ligne",14,0xffb4bbc3);
         fileInfo=label("Aucun morceau importé",17,0xffffffff);
         fileInfo.setBackgroundColor(0xff172820);
+        camera=button("OUVRIR LA CAMÉRA + PROMPTEUR",()->openCamera());
+        camera.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff087b59));
+        cameraHint=label("Importe un morceau pour ouvrir la caméra.",13,0xffb4bbc3);
+        pdfExport=button("Exporter les paroles en PDF",()->choosePdf());
         backingInfo=label("Instrumental : aucun",13,0xffb4bbc3);
         pick=button("Importer un audio / vidéo",()->choose(1));
         pickBacking=button("Importer instrumental (facultatif)",()->choose(2));
@@ -79,8 +88,6 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         analyze=button("Extraire les paroles",()->confirmAnalysis());
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setMax(100);progress.setVisibility(View.GONE);root.addView(progress,new LinearLayout.LayoutParams(-1,-2));
         cancelAnalysis=button("Annuler la transcription",()->{cancelled=true;phase="Annulation…";cancelAnalysis.setEnabled(false);});
-        camera=button("FILMER FACE CAMÉRA + PAROLES",()->openCamera());
-        camera.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff087b59));
         clock=label("00:00",16,0xffb4bbc3);
         current=label("Les paroles s'afficheront ici",34,0xff36e2a3);current.setGravity(Gravity.CENTER);
         next=label("",24,0xffffffff);next.setGravity(Gravity.CENTER);
@@ -101,10 +108,10 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         });
         button("Écouter le morceau original",()->{if(!busy)prepare(music());});
         button("Utiliser l'instrumental",()->{if(busy)return;if(backing!=null)prepare(instrumental());else status.setText("Importe d'abord ton instrumental.");});
-        load();advance.setProgress(lead/100);refresh();ui.post(tick);
+        load();if(b!=null){pendingPdfTitle=b.getString("pdf_title");pendingPdfText=b.getString("pdf_text");}advance.setProgress(lead/100);refresh();ui.post(tick);
     }
     private void choose(int request){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("*/*");i.addCategory(Intent.CATEGORY_OPENABLE);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(i,request);}
-    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null||data.getData()==null)return;Uri u=data.getData();try{getContentResolver().takePersistableUriPermission(u,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception e){status.setText("Accès durable indisponible : "+e.getMessage());return;}
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null||data.getData()==null)return;Uri u=data.getData();if(request==REQUEST_LYRICS_PDF){writePdf(u);return;}try{getContentResolver().takePersistableUriPermission(u,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception e){status.setText("Accès durable indisponible : "+e.getMessage());return;}
         if(request==1){if(!lines.isEmpty()){new AlertDialog.Builder(this).setTitle("Remplacer le morceau actuel ?").setMessage("Les paroles du morceau actuel seront remplacées.").setNegativeButton("Annuler",null).setPositiveButton("Remplacer",(d,w)->setSource(u)).show();}else setSource(u);}
         else if(request==2){importTrack(u,2);}
         else if(request==3){if(source==null){status.setText("Importe d’abord ton morceau original.");return;}importTrack(u,3);}
@@ -139,18 +146,57 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         });
     }
     private void openCamera(){
-        if(busy||lines.isEmpty()||music()==null)return;
+        if(music()==null)return;
+        if(busy){
+            if(analyzing&&!cancelled)new AlertDialog.Builder(this).setTitle("Ouvrir la caméra maintenant ?")
+                .setMessage("La transcription sera arrêtée. Les paroles déjà enregistrées sont conservées ; tu peux filmer même sans paroles.")
+                .setNegativeButton("Continuer l'analyse",null)
+                .setPositiveButton("Arrêter et ouvrir",(d,w)->{cameraAfterCancel=true;cancelled=true;phase="Annulation avant ouverture caméra…";refresh();}).show();
+            else Toast.makeText(this,"Préparation en cours…",Toast.LENGTH_SHORT).show();
+            return;
+        }
         save();
-        String[] choices=new String[]{"Morceau original · vertical 9:16","Morceau original · horizontal 16:9"};
-        new AlertDialog.Builder(this).setTitle("Musique et format de la caméra").setItems(choices,(d,i)->{
+        String[] choices=new String[]{"Caméra avant · vertical 9:16","Caméra arrière · vertical 9:16","Caméra avant · horizontal 16:9","Caméra arrière · horizontal 16:9"};
+        new AlertDialog.Builder(this).setTitle("Filmer avec le morceau original").setItems(choices,(d,i)->{
+            if(player!=null&&player.isPlaying())player.pause();
             Intent intent=new Intent(this,ClassicCameraActivity.class);
             intent.putExtra("music_prompter_camera",true);
             intent.putExtra("music_prompter_name",fileName(source));
             intent.putExtra("music_prompter_uri",music().toString());
-            intent.putExtra(CaptureFormat.EXTRA_FORMAT,i%2==0?CaptureFormat.VERTICAL:CaptureFormat.HORIZONTAL);
+            intent.putExtra("music_prompter_back_camera",i%2==1);
+            intent.putExtra(CaptureFormat.EXTRA_FORMAT,i<2?CaptureFormat.VERTICAL:CaptureFormat.HORIZONTAL);
             startActivity(intent);
         }).show();
     }
+    private void choosePdf(){
+        if(lines.isEmpty()){Toast.makeText(this,"Aucune parole enregistrée à exporter.",Toast.LENGTH_SHORT).show();return;}
+        new AlertDialog.Builder(this).setTitle("Exporter toutes les paroles").setItems(new String[]{"Paroles seules","Paroles et horaires"},(d,i)->{
+            String title=fileName(source).replaceFirst("\\.[^.]+$","");
+            StringBuilder content=new StringBuilder();
+            for(Line line:lines){if(i==1)content.append(String.format(Locale.FRANCE,"%02d:%02d.%03d  ",line.start/60000,(line.start/1000)%60,line.start%1000));content.append(line.text).append("\n\n");}
+            pendingPdfTitle=title;pendingPdfText=content.toString().trim();
+            Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/pdf");
+            intent.putExtra(Intent.EXTRA_TITLE,title+" - Paroles.pdf");
+            try{startActivityForResult(intent,REQUEST_LYRICS_PDF);}catch(android.content.ActivityNotFoundException e){Toast.makeText(this,"Aucun gestionnaire de fichiers disponible.",Toast.LENGTH_LONG).show();}
+        }).show();
+    }
+    private void writePdf(Uri target){
+        final String title=pendingPdfTitle,text=pendingPdfText;
+        pendingPdfTitle=null;pendingPdfText=null;
+        if(title==null||text==null||text.isEmpty()){Toast.makeText(this,"Export annulé : sélectionne de nouveau les paroles.",Toast.LENGTH_LONG).show();return;}
+        new Thread(()->{
+            try(OutputStream out=getContentResolver().openOutputStream(target,"w")){
+                if(out==null)throw new IOException("Destination PDF inaccessible");
+                LyricsPdfExporter.write(out,title,text);
+                ui.post(()->{if(!dead)new AlertDialog.Builder(this).setTitle("PDF enregistré").setMessage("Toutes les paroles sont dans le document choisi.").setPositiveButton("Ouvrir",(d,w)->{
+                    try{startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(target,"application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));}catch(android.content.ActivityNotFoundException e){Toast.makeText(this,"PDF enregistré. Aucun lecteur PDF installé.",Toast.LENGTH_LONG).show();}
+                }).setNegativeButton("Fermer",null).show();});
+            }catch(Exception e){ui.post(()->{if(!dead)Toast.makeText(this,"Export PDF impossible : "+e.getMessage(),Toast.LENGTH_LONG).show();});}
+        },"lyrics-pdf").start();
+    }
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("pdf_title",pendingPdfTitle);state.putString("pdf_text",pendingPdfText);}
+    private void finishCameraRequest(){if(cameraAfterCancel){cameraAfterCancel=false;openCamera();}}
     private File model(){return new File(getFilesDir(),"ggml-large-v3-turbo-q5_0.bin");}
     private void confirmAnalysis(){if(source==null||busy)return;if(!QwenLocal.supported())useQwen=false;runAnalysis();}
     private void message(String s){ui.post(()->{if(!dead){if(analyzing){phase=s;analysisProgress=-1;}status.setText(s);}});}
@@ -213,8 +259,8 @@ public final class MusicPrompterActivity extends AppCompatActivity {
                 ArrayList<Line> found=new ArrayList<>();
                 for(int k=0;k+2<result.length;k+=3){String text=result[k+2].trim();long from=Long.parseLong(result[k]),to=Long.parseLong(result[k+1]);if(!text.isEmpty()&&to>from)found.add(new Line(from,to,text));}
                 if(found.isEmpty())throw new IOException("Aucune parole exploitable détectée");
-                ui.post(()->{if(dead)return;lines.clear();lines.addAll(found);save();busy=false;analyzing=false;status.setText(lines.size()+" passages détectés · "+(useQwen?"horaires approximatifs, à corriger":"vérifie les paroles")+(separationUsed?" · voix isolée":separationNote));refresh();prepare(music());});
-            }catch(Exception|LinkageError|OutOfMemoryError e){ui.post(()->{if(dead)return;busy=false;analyzing=false;status.setText(cancelled?"Transcription annulée · anciennes paroles conservées":"Analyse impossible : "+(e instanceof OutOfMemoryError?"mémoire insuffisante pour ce modèle":e.getMessage()));refresh();});}
+                ui.post(()->{if(dead)return;lines.clear();lines.addAll(found);save();busy=false;analyzing=false;status.setText(lines.size()+" passages détectés · "+(useQwen?"horaires approximatifs, à corriger":"vérifie les paroles")+(separationUsed?" · voix isolée":separationNote));refresh();prepare(music());finishCameraRequest();});
+            }catch(Exception|LinkageError|OutOfMemoryError e){ui.post(()->{if(dead)return;busy=false;analyzing=false;status.setText(cancelled?"Transcription annulée · anciennes paroles conservées":"Analyse impossible : "+(e instanceof OutOfMemoryError?"mémoire insuffisante pour ce modèle":e.getMessage()));refresh();finishCameraRequest();});}
         });
     }
     private void prepare(Uri uri){if(uri==null||busy)return;releasePlayer();prepared=false;try{player=new MediaPlayer();player.setDataSource(this,uri);player.prepare();prepared=true;seek.setMax(player.getDuration());player.setOnCompletionListener(p->render(p.getDuration()));}catch(Exception e){releasePlayer();status.setText("Lecture impossible : "+e.getMessage());}}
@@ -223,7 +269,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private void render(long t){clock.setText(duration(t)+" / "+duration(player==null?0:player.getDuration()));long at=t+lead;active=-1;for(int i=0;i<lines.size();i++){if(lines.get(i).start<=at)active=i;else break;}current.setText(active<0?"Prépare-toi…":lines.get(active).text);next.setText(active+1<lines.size()?lines.get(active+1).text:"");}
     private void editLines(){if(lines.isEmpty())return;String[] choices=new String[lines.size()];for(int i=0;i<lines.size();i++)choices[i]=String.format(Locale.FRANCE,"%.2f s · %s",lines.get(i).start/1000f,lines.get(i).text);new AlertDialog.Builder(this).setTitle("Choisir un passage").setItems(choices,(d,i)->editLine(i)).setNegativeButton("Fermer",null).show();}
     private void editLine(int i){Line l=lines.get(i);LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(24,12,24,12);EditText time=new EditText(this),words=new EditText(this);time.setHint("Début en secondes");time.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);time.setText(String.format(Locale.US,"%.2f",l.start/1000f));words.setText(l.text);box.addView(time);box.addView(words);new AlertDialog.Builder(this).setTitle("Corriger le passage").setView(box).setNegativeButton("Annuler",null).setPositiveButton("Enregistrer",(d,w)->{try{long v=Math.round(Double.parseDouble(time.getText().toString().replace(',','.'))*1000);if(v<0||v>900000)throw new Exception();l.start=v;l.text=words.getText().toString().trim();Collections.sort(lines,(a,b)->Long.compare(a.start,b.start));save();}catch(Exception e){status.setText("Horaire invalide");}}).show();}
-    private void refresh(){isolateVoice.setEnabled(!busy&&vocal==null&&QwenLocal.supported());engineChoice.setEnabled(!busy);for(int i=0;i<engineChoice.getChildCount();i++)engineChoice.getChildAt(i).setEnabled(!busy&&(i!=0||QwenLocal.supported()));pick.setEnabled(!busy);pickBacking.setEnabled(!busy);pickVocal.setEnabled(!busy&&source!=null);clearVocal.setEnabled(!busy&&vocal!=null);cancelAnalysis.setVisibility(analyzing?View.VISIBLE:View.GONE);cancelAnalysis.setEnabled(analyzing&&!cancelled);vocalInfo.setText(vocal==null?"Source de transcription : morceau original":"Voix pour analyse : "+fileName(vocal));analyze.setEnabled(!busy&&source!=null);play.setEnabled(!busy&&source!=null);edit.setEnabled(!busy&&!lines.isEmpty());camera.setEnabled(!busy&&!lines.isEmpty()&&source!=null);progress.setVisibility(busy?View.VISIBLE:View.GONE);if(busy){progress.setIndeterminate(percent<0);if(percent>=0)progress.setProgress(percent);}fileInfo.setText(source==null?"Aucun morceau importé":"MORCEAU IMPORTÉ\n"+fileName(source)+(prepared&&player!=null?" · "+duration(player.getDuration()):""));backingInfo.setText("Instrumental : "+(backing==null?"aucun":fileName(backing)));}
+    private void refresh(){isolateVoice.setEnabled(!busy&&vocal==null&&QwenLocal.supported());engineChoice.setEnabled(!busy);for(int i=0;i<engineChoice.getChildCount();i++)engineChoice.getChildAt(i).setEnabled(!busy&&(i!=0||QwenLocal.supported()));pick.setEnabled(!busy);pickBacking.setEnabled(!busy);pickVocal.setEnabled(!busy&&source!=null);clearVocal.setEnabled(!busy&&vocal!=null);cancelAnalysis.setVisibility(analyzing?View.VISIBLE:View.GONE);cancelAnalysis.setEnabled(analyzing&&!cancelled);vocalInfo.setText(vocal==null?"Source de transcription : morceau original":"Voix pour analyse : "+fileName(vocal));analyze.setEnabled(!busy&&source!=null);play.setEnabled(!busy&&source!=null);edit.setEnabled(!busy&&!lines.isEmpty());camera.setEnabled(source!=null&&(!busy||(analyzing&&!cancelled)));pdfExport.setEnabled(!lines.isEmpty());cameraHint.setText(source==null?"Importe un morceau pour ouvrir la caméra.":analyzing?"Analyse en cours · caméra accessible en arrêtant l’analyse.":lines.isEmpty()?"Caméra disponible · pas encore de paroles enregistrées.":lines.size()+" passages disponibles · caméra et PDF prêts.");progress.setVisibility(busy?View.VISIBLE:View.GONE);if(busy){progress.setIndeterminate(percent<0);if(percent>=0)progress.setProgress(percent);}fileInfo.setText(source==null?"Aucun morceau importé":"MORCEAU IMPORTÉ\n"+fileName(source)+(prepared&&player!=null?" · "+duration(player.getDuration()):""));backingInfo.setText("Instrumental : "+(backing==null?"aucun":fileName(backing)));}
     private void save(){try{JSONObject o=new JSONObject();o.put("source",source==null?"":source.toString());o.put("backing",backing==null?"":backing.toString());o.put("lead",lead);o.put("vocal",vocal==null?"":vocal.toString());o.put("vocalPlayable",vocalPlayable==null?"":vocalPlayable.toString());o.put("playable",playable==null?"":playable.toString());o.put("backingPlayable",backingPlayable==null?"":backingPlayable.toString());JSONArray a=new JSONArray();for(Line l:lines){JSONArray x=new JSONArray();x.put(l.start);x.put(l.end);x.put(l.text);a.put(x);}o.put("lines",a);getSharedPreferences("music_prompter",0).edit().putString("project",o.toString()).apply();}catch(Exception ignored){}}
     private void load(){try{JSONObject o=new JSONObject(getSharedPreferences("music_prompter",0).getString("project","{}"));String s=o.optString("source"),b=o.optString("backing");source=s.isEmpty()?null:Uri.parse(s);backing=b.isEmpty()?null:Uri.parse(b);String pp=o.optString("playable"),bp=o.optString("backingPlayable");playable=pp.isEmpty()?null:Uri.parse(pp);backingPlayable=bp.isEmpty()?null:Uri.parse(bp);String v=o.optString("vocal"),vp=o.optString("vocalPlayable");vocal=v.isEmpty()?null:Uri.parse(v);vocalPlayable=vp.isEmpty()?null:Uri.parse(vp);lead=o.optInt("lead",1000);JSONArray a=o.optJSONArray("lines");if(a!=null)for(int i=0;i<a.length();i++){JSONArray x=a.getJSONArray(i);lines.add(new Line(x.getLong(0),x.getLong(1),x.getString(2)));}if(source!=null)prepare(music());}catch(Exception ignored){}}
     private void releasePlayer(){prepared=false;if(player!=null){player.release();player=null;}}

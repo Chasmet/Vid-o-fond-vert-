@@ -243,6 +243,9 @@ public final class ClassicCameraActivity extends AppCompatActivity {
                 + " · MICRO COUPÉ · IMPORTE UNE MUSIQUE");
         if(getIntent().getBooleanExtra("music_prompter_camera",false)&&getIntent().getStringExtra("music_prompter_uri")!=null){
             prompterMode=true;
+            lensFacing=getIntent().getBooleanExtra("music_prompter_back_camera",false)?CameraSelector.LENS_FACING_BACK:CameraSelector.LENS_FACING_FRONT;
+            previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             try{
                 org.json.JSONObject project=new org.json.JSONObject(getSharedPreferences("music_prompter",0).getString("project","{}"));
                 prompterLines=project.optJSONArray("lines");prompterLead=project.optInt("lead",1000);
@@ -757,7 +760,8 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     }
 
     private void renderPrompter(int positionMs){
-        if(prompterOverlay==null||prompterLines==null)return;
+        if(prompterOverlay==null)return;
+        if(prompterLines==null||prompterLines.length()==0){prompterOverlay.setText("Musique originale · sans paroles");return;}
         int active=-1;long t=(long)positionMs+prompterLead;
         for(int i=0;i<prompterLines.length();i++){org.json.JSONArray l=prompterLines.optJSONArray(i);if(l!=null&&l.optLong(0)<=t)active=i;else break;}
         org.json.JSONArray line=prompterLines.optJSONArray(active),nextLine=prompterLines.optJSONArray(active+1);

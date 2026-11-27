@@ -20,3 +20,6 @@ UVR MDX-NET Voc_FT (66,762,795 octets) via l'API C officielle sherpa-onnx v1.13.
 
 ## v1.15.3 — distribution entièrement hors ligne
 Les trois poids (Qwen 0.6B, UVR et Whisper Turbo) sont inclus dans l'APK de production, vérifiés par SHA-256 lors de la compilation. Pas de téléchargement runtime ni dialogue d'installation réseau. Le premier usage prépare les fichiers dans le stockage privé de l'app. L'APK debug de CI reste léger; l'APK Release est complet. Le contrôle CI interdit de publier si un poids manque ou si l'APK dépasse la limite GitHub de 2 GiB. L'installation de cet APK volumineux sur téléphone reste à vérifier.
+
+## v1.15.4
+Caméra en haut de l'écran, avant/arrière et vertical/horizontal, accessible sans transcription complète. Si une analyse est en cours, l'utilisateur peut la conserver ou l'arrêter avant d'ouvrir la caméra. Export PDF A4 des paroles sauvegardées, avec ou sans horaires, via le sélecteur Android; pagination et test de lecture multipage. La musique originale reste la seule piste de l'export vidéo. Modèles embarqués et signature historique inchangés.
