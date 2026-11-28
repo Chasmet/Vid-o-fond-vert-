@@ -14,14 +14,18 @@ public final class PrompterMcpService extends Service {
     private static WeakReference<MusicPrompterActivity> screen=new WeakReference<>(null);
     private static PrompterMcpService service;
     private static BackgroundPrompter backend;
+    private static McpTranscriptionJob analysis;
     static PrompterMcpClient client(Context c){
         if(client==null){
-            Context app=c.getApplicationContext();backend=new BackgroundPrompter(app);
+            Context app=c.getApplicationContext();backend=new BackgroundPrompter(app);analysis=new McpTranscriptionJob(app,backend);
             client=new PrompterMcpClient(app,PrompterMcpService::dispatch);
         }
         return client;
     }
-    static void attach(MusicPrompterActivity a){screen=new WeakReference<>(a);}
+    static void attach(MusicPrompterActivity a){screen=new WeakReference<>(a);if(backend!=null)backend.release();}
+    static boolean analyzing(){return analysis!=null&&analysis.running();}
+    static String analysisLabel(){try{return analysis==null?"":analysis.status().optString("phase");}catch(Exception e){return "";}}
+    static void refreshScreen(){MusicPrompterActivity a=screen.get();if(a!=null&&!a.isDestroyed())try{a.reloadMcpLyrics();}catch(Exception ignored){}}
     static void detach(MusicPrompterActivity a){if(screen.get()==a)screen.clear();}
     static void start(Context c){
         Intent i=new Intent(c,PrompterMcpService.class);
@@ -30,6 +34,10 @@ public final class PrompterMcpService extends Service {
     static void stop(Context c){c.stopService(new Intent(c,PrompterMcpService.class));}
     private static JSONObject dispatch(String action,JSONObject args)throws Exception{
         MusicPrompterActivity a=screen.get();
+        if(action.equals("analysis_status"))return analysis.status();
+        if(action.equals("analysis_cancel")){analysis.cancel();return analysis.status();}
+        if(action.equals("analysis_start")){if(a!=null&&a.mcpEditing())throw new java.io.IOException("Éditeur ou transcription locale en cours");return analysis.start(args);}
+        if(analyzing()&&(action.equals("lyrics_add")||action.equals("lyrics_update")||action.equals("lyrics_delete")||action.equals("lyrics_restore")||action.equals("lyrics_batch")))throw new java.io.IOException("Transcription en cours : annule-la avant de modifier les paroles.");
         if(action.equals("mcp_diagnostics"))return new JSONObject().put("ok",true).put("service_running",service!=null).put("foreground_ui",a!=null&&a.mcpVisible()).put("background_supported",true);
         if(a!=null&&!a.isDestroyed()&&!a.isFinishing()){
             if(action.equals("lyrics_search")||action.equals("lyrics_audit")||action.equals("lyrics_text")||action.equals("lyrics_batch")||action.equals("lyrics_export_local")){
@@ -74,10 +82,11 @@ public final class PrompterMcpService extends Service {
     }
     private void showRequest(String action){
         NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return;
         nm.notify(1608,notification(action.equals("prompter_open_camera")?"Demande caméra · ouvrir et confirmer":"Demande PDF · ouvrir et confirmer"));
     }
     @Override public void onDestroy(){
-        if(client!=null)client.pause();if(backend!=null)backend.release();service=null;stopForeground(true);super.onDestroy();
+        if(client!=null)client.pause();if(analysis!=null)analysis.cancel();if(backend!=null)backend.release();service=null;stopForeground(true);super.onDestroy();
     }
     @Override public IBinder onBind(Intent intent){return null;}
 }

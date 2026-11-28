@@ -38,3 +38,6 @@ Connexion volontaire au serveur HTTPS existant via invitation `/api/onboard`, pa
 
 ## v1.15.9
 Service MCP au premier plan Android avec notification et arrêt volontaire, commandes en arrière-plan, conservation de l'association existante. Synchronisation des capacités sur le serveur. Ajouts : recherche, audit des trous et chevauchements, texte intégral, lot atomique de corrections, diagnostic, création PDF privé. Les tâches UI caméra et sélecteur PDF demandent toujours ouverture/confirmation locale. Android peut arrêter le service (arrêt forcé, batterie, système); aucun redémarrage caché au boot. Les corrections sont protégées par révision et sauvegarde. Aucun changement des modèles/signature.
+
+## v1.16.0
+Transcription locale depuis MCP en arrière-plan : analysis_start (revision, engine whisper/qwen, isolate, replace), analysis_status, analysis_cancel. Tâche asynchrone indépendante de l'activité, contrôle de révision avant sauvegarde, sauvegarde des anciennes paroles, annulation sur arrêt du service. Lancer uniquement après autorisation serveur. Les corrections et imports locaux concurrents sont bloqués pendant l'analyse MCP. Les modèles restent embarqués. Les temps Qwen restent approximatifs.

@@ -19,7 +19,7 @@ final class BackgroundPrompter {
     private JSONObject project()throws Exception{return new JSONObject(prefs.getString("project","{}"));}
     private JSONArray rows(JSONObject p){JSONArray a=p.optJSONArray("lines");return a==null?new JSONArray():a;}
     private String song(JSONObject p){String s=p.optString("source");if(s.isEmpty())return "";Uri u=Uri.parse(s);try(Cursor c=app.getContentResolver().query(u,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(c!=null&&c.moveToFirst()&&!c.isNull(0))return c.getString(0);}catch(Exception ignored){}return u.getLastPathSegment();}
-    private String revision(JSONObject p)throws Exception{
+    String revision(JSONObject p)throws Exception{
         MessageDigest md=MessageDigest.getInstance("SHA-256");md.update(p.optString("source").getBytes("UTF-8"));StringBuilder s=new StringBuilder();for(byte b:md.digest(rows(p).toString().getBytes("UTF-8")))s.append(String.format(Locale.US,"%02x",b&255));return s.toString();
     }
     private long length(JSONObject p)throws Exception{

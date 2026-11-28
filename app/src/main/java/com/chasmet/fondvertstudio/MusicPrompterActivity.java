@@ -87,7 +87,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         pickBacking=button("Importer instrumental (facultatif)",()->choose(2));
         vocalInfo=label("Source de transcription : morceau original",13,0xffb4bbc3);
         pickVocal=button("Importer voix studio seule (facultatif)",()->choose(3));
-        clearVocal=button("Analyser le morceau original",()->{if(busy)return;vocal=null;vocalPlayable=null;save();refresh();});
+        clearVocal=button("Analyser le morceau original",()->{if(busy||PrompterMcpService.analyzing())return;vocal=null;vocalPlayable=null;save();refresh();});
         isolateVoice=new CheckBox(this);isolateVoice.setText("Isoler la voix (UVR) · plus lent");isolateVoice.setTextColor(0xffffffff);isolateVoice.setChecked(QwenLocal.supported()&&getSharedPreferences("music_prompter",0).getBoolean("isolate_voice_v2",false));root.addView(isolateVoice);isolateVoice.setOnCheckedChangeListener((v,checked)->getSharedPreferences("music_prompter",0).edit().putBoolean("isolate_voice_v2",checked).apply());
         label("Moteur de transcription",16,0xffffffff);
         label("Pour aller plus vite : Whisper Turbo, sans UVR. La voix studio seule améliore la reconnaissance sans séparation.",13,0xffb4bbc3);
@@ -121,7 +121,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         button("Utiliser l'instrumental",()->{if(busy)return;if(backing!=null)prepare(instrumental());else status.setText("Importe d'abord ton instrumental.");});
         load();if(b!=null){pendingPdfTitle=b.getString("pdf_title");pendingPdfText=b.getString("pdf_text");pendingExportText=b.getString("export_text");pendingExportMime=b.getString("export_mime");}advance.setProgress(lead/100);refresh();ui.post(tick);
     }
-    private void choose(int request){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("*/*");i.addCategory(Intent.CATEGORY_OPENABLE);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(i,request);}
+    private void choose(int request){if(PrompterMcpService.analyzing()){status.setText("Transcription ChatGPT en cours.");return;}Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("*/*");i.addCategory(Intent.CATEGORY_OPENABLE);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(i,request);}
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null||data.getData()==null)return;Uri u=data.getData();if(request==REQUEST_LYRICS_PDF){writePdf(u);return;}if(request==REQUEST_TRANSCRIPT){writeTranscript(u);return;}try{getContentResolver().takePersistableUriPermission(u,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception e){status.setText("Accès durable indisponible : "+e.getMessage());return;}
         if(request==1){if(!lines.isEmpty()){new AlertDialog.Builder(this).setTitle("Remplacer le morceau actuel ?").setMessage("Les paroles du morceau actuel seront remplacées.").setNegativeButton("Annuler",null).setPositiveButton("Remplacer",(d,w)->setSource(u)).show();}else setSource(u);}
         else if(request==2){importTrack(u,2);}
@@ -129,7 +129,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     }
     private void setSource(Uri u){importTrack(u,1);}
     private void importTrack(Uri u,int kind){
-        if(busy)return;
+        if(busy||PrompterMcpService.analyzing())return;
         busy=true;percent=-1;startedAt=SystemClock.elapsedRealtime();if(player!=null&&player.isPlaying())player.pause();
         final int originalDuration=prepared&&player!=null?player.getDuration():0;
         status.setText("Import en cours : "+fileName(u));refresh();
@@ -242,7 +242,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     }
     private void finishCameraRequest(){if(cameraAfterCancel){cameraAfterCancel=false;openCamera();}}
     private File model(){return new File(getFilesDir(),"ggml-large-v3-turbo-q5_0.bin");}
-    private void confirmAnalysis(){if(source==null||busy)return;if(!QwenLocal.supported())useQwen=false;runAnalysis();}
+    private void confirmAnalysis(){if(source==null||busy||PrompterMcpService.analyzing())return;if(!QwenLocal.supported())useQwen=false;runAnalysis();}
     private void message(String s){ui.post(()->{if(!dead){if(analyzing){phase=s;}status.setText(s);}});}
     private void reportProgress(int value){ui.post(()->{if(dead||!analyzing||cancelled)return;analysisProgress=Math.max(analysisProgress,Math.min(100,Math.max(0,value)));if(!useQwen)phase="Transcription Large V3 Turbo";progress.setIndeterminate(analysisProgress==0);if(analysisProgress>0)progress.setProgress(analysisProgress);});}
     private void ensureModel() throws Exception {
@@ -309,7 +309,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     }
     private void prepare(Uri uri){if(uri==null||busy)return;releasePlayer();prepared=false;try{player=new MediaPlayer();player.setDataSource(this,uri);player.prepare();prepared=true;seek.setMax(player.getDuration());player.setOnCompletionListener(p->render(p.getDuration()));}catch(Exception e){releasePlayer();status.setText("Lecture impossible : "+e.getMessage());}}
     private void toggle(){if(busy)return;if(player==null)prepare(music());if(player!=null){if(player.isPlaying())player.pause();else player.start();}}
-    private final Runnable tick=new Runnable(){public void run(){if(dead)return;if(mcp!=null&&mcpStatus!=null&&!mcpStatus.getText().toString().equals(mcp.status()))mcpStatus.setText(mcp.status());if(analyzing){status.setText(phase+(analysisProgress>0?" · "+analysisProgress+" %":"")+" · "+duration(SystemClock.elapsedRealtime()-startedAt));}if(player!=null&&!drag){try{int t=player.getCurrentPosition();seek.setProgress(t);render(t);}catch(Exception ignored){}}ui.postDelayed(this,80);}};
+    private final Runnable tick=new Runnable(){public void run(){if(dead)return;if(mcp!=null&&mcpStatus!=null&&!mcpStatus.getText().toString().equals(mcp.status()))mcpStatus.setText(mcp.status());if(PrompterMcpService.analyzing())status.setText("MCP : "+PrompterMcpService.analysisLabel());if(analyzing){status.setText(phase+(analysisProgress>0?" · "+analysisProgress+" %":"")+" · "+duration(SystemClock.elapsedRealtime()-startedAt));}if(player!=null&&!drag){try{int t=player.getCurrentPosition();seek.setProgress(t);render(t);}catch(Exception ignored){}}ui.postDelayed(this,80);}};
     private void render(long t){clock.setText(duration(t)+" / "+duration(player==null?0:player.getDuration()));long at=t+lead;active=-1;int upcoming=-1;for(int i=0;i<lines.size();i++){Line l=lines.get(i);if(l.start>at){upcoming=i;break;}if(at<l.end)active=i;}current.setText(active<0?"Prépare-toi…":lines.get(active).text);next.setText(upcoming>=0?lines.get(upcoming).text:"");}
     private void showMcp(){
         if(mcp.paired()){
@@ -337,7 +337,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     boolean mcpVisible(){return mcpVisible;}
     boolean mcpEditing(){return busy||(lyricsEditor!=null&&lyricsEditor.isShowing());}
     void reloadMcpLyrics()throws Exception{JSONObject o=new JSONObject(getSharedPreferences("music_prompter",0).getString("project","{}"));JSONArray arr=o.getJSONArray("lines");lines.clear();for(int i=0;i<arr.length();i++){JSONArray x=arr.getJSONArray(i);lines.add(new Line(x.getLong(0),x.getLong(1),x.getString(2)));}refresh();if(player!=null)render(player.getCurrentPosition());}
-    private void startMcpService(){try{PrompterMcpService.start(this);if(android.os.Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},1701);}catch(Exception e){status.setText("Service MCP : "+e.getMessage());}}
+    private void startMcpService(){try{PrompterMcpService.start(this);if(android.os.Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED&&!getPreferences(0).getBoolean("mcp_notif_requested",false)){getPreferences(0).edit().putBoolean("mcp_notif_requested",true).apply();requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},1701);}}catch(Exception e){status.setText("Service MCP : "+e.getMessage());}}
     JSONObject mcpExecute(String action,JSONObject args)throws Exception{
         JSONObject r=new JSONObject().put("ok",true);
         if(action.equals("prompter_status"))return r.put("version",getPackageManager().getPackageInfo(getPackageName(),0).versionName).put("song",source==null?"":fileName(source)).put("duration_ms",player==null?0:player.getDuration()).put("position_ms",player==null?0:player.getCurrentPosition()).put("busy",busy).put("count",lines.size()).put("revision",mcpRevision()).put("editor_open",lyricsEditor!=null&&lyricsEditor.isShowing());
@@ -380,7 +380,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         return r.put("revision",mcpRevision()).put("count",lines.size()).put("saved",true);
     }
     private void editLines(){
-        if(busy||music()==null)return;
+        if(busy||music()==null||PrompterMcpService.analyzing())return;
         long position=0,length=0;
         try{if(player!=null){position=player.getCurrentPosition();if(player.isPlaying())player.pause();length=player.getDuration();}}catch(Exception ignored){}
         ArrayList<LyricsTimeline.Row> data=new ArrayList<>();

@@ -15,8 +15,8 @@ import java.util.concurrent.*;
 final class PrompterMcpClient {
     interface Target { JSONObject execute(String action,JSONObject args)throws Exception; }
     interface Callback { void done(boolean ok,String message); }
-    private static final String[] READ={"prompter_status","lyrics_list","lyrics_search","lyrics_audit","lyrics_text","mcp_diagnostics"};
-    private static final String[] WRITE={"lyrics_add","lyrics_update","lyrics_delete","lyrics_restore","prompter_seek","prompter_play","prompter_open_camera","lyrics_export_pdf","lyrics_batch","lyrics_export_local"};
+    private static final String[] READ={"prompter_status","lyrics_list","lyrics_search","lyrics_audit","lyrics_text","mcp_diagnostics","analysis_status"};
+    private static final String[] WRITE={"lyrics_add","lyrics_update","lyrics_delete","lyrics_restore","prompter_seek","prompter_play","prompter_open_camera","lyrics_export_pdf","lyrics_batch","lyrics_export_local","analysis_start","analysis_cancel"};
     private final AtomicFile store;
     private final Handler main=new Handler(Looper.getMainLooper());
     private final ScheduledExecutorService io=Executors.newSingleThreadScheduledExecutor();
@@ -26,7 +26,7 @@ final class PrompterMcpClient {
     private volatile String status="Non associé",base="";
     private volatile long epoch;
     private ScheduledFuture<?> polling;
-    private boolean synced;
+    private volatile boolean synced;
     PrompterMcpClient(Context c,Target t){
         target=t;
         store=new AtomicFile(new File(c.getNoBackupFilesDir(),"fondvert-mcp.json"));
@@ -87,7 +87,7 @@ final class PrompterMcpClient {
         long session=epoch;String host=base,id=state.optString("id"),secret=state.optString("secret");
         try{
             String route="/api/agent/"+id;
-            if(!synced){request(host,"PUT",route+"/capabilities",new JSONObject().put("capabilities",caps()),secret);synced=true;}
+            if(!synced){try{request(host,"PUT",route+"/capabilities",new JSONObject().put("capabilities",caps()),secret);synced=true;}catch(IOException ex){status="MCP : capacités à synchroniser";}}
             // A leased operation is never blindly replayed after interruption.
             JSONObject pending=state.optJSONObject("pending");
             if(pending!=null){
