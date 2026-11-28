@@ -71,9 +71,9 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         button("Retour",()->finish());
         label("PROMPTEUR MUSICAL IA",25,0xff36e2a3);
-        status=label("Modèles inclus · fonctionnement hors ligne",14,0xffb4bbc3);
+        status=label("Modèles locaux · téléchargement unique si manquants",14,0xffb4bbc3);
         mcp=PrompterMcpService.client(this);PrompterMcpService.attach(this);
-        button("Connexion ChatGPT · MCP",this::showMcp);
+        button("Connexion ChatGPT · MCP",()->startActivity(new Intent(this,SettingsActivity.class)));
         mcpStatus=label(mcp.status(),13,0xffb4bbc3);
         fileInfo=label("Aucun morceau importé",17,0xffffffff);
         fileInfo.setBackgroundColor(0xff172820);
@@ -246,21 +246,8 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private void message(String s){ui.post(()->{if(!dead){if(analyzing){phase=s;}status.setText(s);}});}
     private void reportProgress(int value){ui.post(()->{if(dead||!analyzing||cancelled)return;analysisProgress=Math.max(analysisProgress,Math.min(100,Math.max(0,value)));if(!useQwen)phase="Transcription Large V3 Turbo";progress.setIndeterminate(analysisProgress==0);if(analysisProgress>0)progress.setProgress(analysisProgress);});}
     private void ensureModel() throws Exception {
-        File dst=model();if(dst.isFile()&&dst.length()>=MODEL_MIN_BYTES)return;
-        if(getFilesDir().getUsableSpace()<650000000L)throw new IOException("Libère 650 Mo pour préparer Whisper.");
-        if(dst.exists()&&!dst.delete())throw new IOException("Impossible de remplacer le modèle incomplet");
-        File tmp=File.createTempFile("turbo-model-", ".part",getFilesDir());
-        MessageDigest hash=MessageDigest.getInstance("SHA-1");long total=0,last=0;
-        try {
-            message("Préparation locale de Whisper inclus…");
-            try(InputStream in=getAssets().open("models/ggml-large-v3-turbo-q5_0.bin");OutputStream out=new BufferedOutputStream(new FileOutputStream(tmp))){
-                byte[] buf=new byte[65536];int count;
-                while((count=in.read(buf))!=-1){if(cancelled||Thread.currentThread().isInterrupted())throw new InterruptedException();out.write(buf,0,count);hash.update(buf,0,count);total+=count;if(total>650000000L)throw new IOException("Modèle trop grand");if(total-last>8000000){last=total;message("Préparation locale Whisper : "+total/1000000+" / 574 Mo");}}
-            }
-            StringBuilder hex=new StringBuilder();for(byte b:hash.digest())hex.append(String.format(Locale.US,"%02x",b&255));
-            if(!MODEL_SHA1.equals(hex.toString()))throw new IOException("Intégrité du modèle incorrecte");
-            if(!tmp.renameTo(dst))throw new IOException("Impossible de sauvegarder le modèle");
-        }finally{tmp.delete();}
+        message("Whisper : réutilisation du modèle local ou téléchargement unique…");
+        ModelSource.ensureFile(this,ModelSource.WHISPER,n->message("Whisper : "+n/1000000+" / 574 Mo"),()->cancelled||dead);
     }
     private void runAnalysis(){
         if(busy||source==null)return;
