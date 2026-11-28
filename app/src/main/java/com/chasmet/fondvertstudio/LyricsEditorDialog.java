@@ -33,6 +33,7 @@ final class LyricsEditorDialog {
     private long duration;
     private MediaPlayer player;
     private boolean ready,drag,closed,dirty,loading;
+    private long pendingSeek=-1;
     private SeekBar seek;
     private TextView clock,info,preview;
     private EditText start,end,words;
@@ -78,6 +79,7 @@ final class LyricsEditorDialog {
         try{
             player=new MediaPlayer();player.setDataSource(c,music);
             player.setOnPreparedListener(mp->{if(closed)return;ready=true;duration=mp.getDuration();seek.setMax((int)duration);jump(position);play.setEnabled(true);notice("Place le curseur puis ajoute ou corrige un passage.");});
+            player.setOnSeekCompleteListener(mp->{pendingSeek=-1;});
             player.setOnCompletionListener(mp->{play.setText("Lecture");});
             player.setOnErrorListener((mp,a,b)->{ready=false;play.setEnabled(false);notice("Lecture indisponible. Tu peux saisir les horaires manuellement.");return true;});
             player.prepareAsync();
@@ -93,11 +95,11 @@ final class LyricsEditorDialog {
         if(multi){e.setMinLines(4);e.setMaxLines(9);e.setGravity(Gravity.TOP|Gravity.START);}else e.setSingleLine(true);
         parent.addView(e,multi?new LinearLayout.LayoutParams(-1,-2):new LinearLayout.LayoutParams(0,-2,1));return e;}
     private void notice(String s){info.setText(s);}
-    private long position(){if(ready&&player!=null&&!drag){try{return player.getCurrentPosition();}catch(Exception ignored){}}return seek.getProgress();}
-    private void jump(long at){int n=(int)Math.max(0,Math.min(duration,at));seek.setProgress(n);if(ready&&player!=null){try{player.seekTo(n);}catch(Exception ignored){}}showPosition(n);}
+    private long position(){if(pendingSeek>=0)return pendingSeek;if(ready&&player!=null&&!drag){try{return player.getCurrentPosition();}catch(Exception ignored){}}return seek.getProgress();}
+    private void jump(long at){int n=(int)Math.max(0,Math.min(duration,at));seek.setProgress(n);if(ready&&player!=null){try{pendingSeek=n;player.seekTo(n);}catch(Exception ignored){}}showPosition(n);}
     private void showPosition(long at){clock.setText(LyricsTimeline.format(at)+" / "+LyricsTimeline.format(duration));int i=LyricsTimeline.active(rows,at);preview.setText(i<0?"Aucun passage à cet instant":rows.get(i).text);}
     private long stopAt=-1;
-    private final Runnable tick=new Runnable(){public void run(){if(closed)return;if(ready&&!drag&&player!=null){try{int at=player.getCurrentPosition();if(stopAt>=0&&at>=stopAt){player.pause();stopAt=-1;play.setText("Lecture");}seek.setProgress(at);showPosition(at);}catch(Exception ignored){}}handler.postDelayed(this,80);}};
+    private final Runnable tick=new Runnable(){public void run(){if(closed)return;if(ready&&!drag&&player!=null){try{int at=(int)position();if(stopAt>=0&&at>=stopAt){player.pause();stopAt=-1;play.setText("Lecture");}seek.setProgress(at);showPosition(at);}catch(Exception ignored){}}handler.postDelayed(this,80);}};
     private void toggle(){if(!ready)return;try{stopAt=-1;if(player.isPlaying()){player.pause();play.setText("Lecture");}else{player.start();play.setText("Pause");}}catch(Exception e){notice("Lecture impossible");}}
     private void snapshot(){undo.push(LyricsTimeline.copy(rows));while(undo.size()>40)undo.removeLast();dirty=true;undoButton.setEnabled(true);}
     private void select(LyricsTimeline.Row r){selected=r;loading=true;panel.setVisibility(r==null?View.GONE:View.VISIBLE);if(r!=null){start.setText(LyricsTimeline.format(r.start));end.setText(LyricsTimeline.format(r.end));words.setText(r.text);}loading=false;}
@@ -154,5 +156,7 @@ final class LyricsEditorDialog {
     }
     private void finish(){saved.accept(LyricsTimeline.copy(rows));dialog.dismiss();}
     private void closeRequest(){if(!dirty&&!pending()){dialog.dismiss();return;}new AlertDialog.Builder(context).setTitle("Modifications non enregistrées").setItems(new String[]{"Enregistrer","Abandonner les modifications","Continuer la correction"},(d,i)->{if(i==0)commitAll();else if(i==1)dialog.dismiss();}).show();}
+    void pausePlayback(){if(ready&&player!=null){try{player.pause();play.setText("Lecture");stopAt=-1;}catch(Exception ignored){}}}
+    void dispose(){if(dialog.isShowing())dialog.dismiss();else release();}
     private void release(){closed=true;handler.removeCallbacksAndMessages(null);if(player!=null){player.release();player=null;}}
 }

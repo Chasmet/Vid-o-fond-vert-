@@ -16,7 +16,7 @@ final class LyricsTimeline {
     static ArrayList<Row> copy(ArrayList<Row> rows){
         ArrayList<Row> out=new ArrayList<>();for(Row r:rows)out.add(r.copy());return out;
     }
-    static void sort(ArrayList<Row> rows){Collections.sort(rows,Comparator.comparingLong(r->r.start));}
+    static void sort(ArrayList<Row> rows){Collections.sort(rows,(a,b)->Long.compare(a.start,b.start));}
     static String format(long ms){return String.format(Locale.US,"%02d:%02d.%03d",ms/60000,(ms/1000)%60,ms%1000);}
     // 64,000 / 64.000 seconds, 01:04.000, 64000 or 64000 ms.
     static long parse(String input){
@@ -29,7 +29,7 @@ final class LyricsTimeline {
                 String[] parts=s.split(":",-1);if(parts.length!=2)throw new IllegalArgumentException();
                 long min=Long.parseLong(parts[0]);BigDecimal sec=new BigDecimal(parts[1]);
                 if(min<0||sec.signum()<0||sec.compareTo(BigDecimal.valueOf(60))>=0)throw new IllegalArgumentException();
-                return Math.addExact(Math.multiplyExact(min,60000L),sec.movePointRight(3).setScale(0,RoundingMode.HALF_UP).longValueExact());
+                return BigDecimal.valueOf(min).multiply(BigDecimal.valueOf(60000)).add(sec.movePointRight(3)).setScale(0,RoundingMode.HALF_UP).longValueExact();
             }
             BigDecimal value=new BigDecimal(s);
             if(!seconds&&s.matches("[0-9]+")&&value.compareTo(BigDecimal.valueOf(1000))>=0)return value.longValueExact();

@@ -46,6 +46,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private MediaPlayer player;
     private TextView status,current,next,clock,leadLabel;
     private Button analyze,play,pick,pickBacking,edit;
+    private LyricsEditorDialog lyricsEditor;
     private SeekBar seek;
     private LinearLayout root;
     private boolean busy=false,drag=false;
@@ -310,7 +311,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         try{if(player!=null){position=player.getCurrentPosition();if(player.isPlaying())player.pause();length=player.getDuration();}}catch(Exception ignored){}
         ArrayList<LyricsTimeline.Row> data=new ArrayList<>();
         for(Line l:lines)data.add(new LyricsTimeline.Row(l.start,l.end,l.text));
-        new LyricsEditorDialog(this,music(),length,position,data,edited->{
+        lyricsEditor=new LyricsEditorDialog(this,music(),length,position,data,edited->{
             lines.clear();for(LyricsTimeline.Row r:edited)lines.add(new Line(r.start,r.end,r.text));
             save();refresh();if(player!=null)render(player.getCurrentPosition());status.setText(lines.size()+" passages enregistrés · caméra et exports synchronisés");
         });
@@ -319,6 +320,6 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private void save(){try{JSONObject o=new JSONObject();o.put("source",source==null?"":source.toString());o.put("backing",backing==null?"":backing.toString());o.put("lead",lead);o.put("vocal",vocal==null?"":vocal.toString());o.put("vocalPlayable",vocalPlayable==null?"":vocalPlayable.toString());o.put("playable",playable==null?"":playable.toString());o.put("backingPlayable",backingPlayable==null?"":backingPlayable.toString());JSONArray a=new JSONArray();for(Line l:lines){JSONArray x=new JSONArray();x.put(l.start);x.put(l.end);x.put(l.text);a.put(x);}o.put("lines",a);getSharedPreferences("music_prompter",0).edit().putString("project",o.toString()).apply();}catch(Exception ignored){}}
     private void load(){try{JSONObject o=new JSONObject(getSharedPreferences("music_prompter",0).getString("project","{}"));String s=o.optString("source"),b=o.optString("backing");source=s.isEmpty()?null:Uri.parse(s);backing=b.isEmpty()?null:Uri.parse(b);String pp=o.optString("playable"),bp=o.optString("backingPlayable");playable=pp.isEmpty()?null:Uri.parse(pp);backingPlayable=bp.isEmpty()?null:Uri.parse(bp);String v=o.optString("vocal"),vp=o.optString("vocalPlayable");vocal=v.isEmpty()?null:Uri.parse(v);vocalPlayable=vp.isEmpty()?null:Uri.parse(vp);lead=o.optInt("lead",1000);JSONArray a=o.optJSONArray("lines");if(a!=null)for(int i=0;i<a.length();i++){JSONArray x=a.getJSONArray(i);lines.add(new Line(x.getLong(0),x.getLong(1),x.getString(2)));}if(source!=null)prepare(music());}catch(Exception ignored){}}
     private void releasePlayer(){prepared=false;if(player!=null){player.release();player=null;}}
-    @Override protected void onPause(){super.onPause();if(player!=null&&player.isPlaying())player.pause();}
-    @Override protected void onDestroy(){dead=true;ui.removeCallbacksAndMessages(null);worker.shutdownNow();releasePlayer();super.onDestroy();}
+    @Override protected void onPause(){super.onPause();if(lyricsEditor!=null)lyricsEditor.pausePlayback();if(player!=null&&player.isPlaying())player.pause();}
+    @Override protected void onDestroy(){dead=true;if(lyricsEditor!=null)lyricsEditor.dispose();ui.removeCallbacksAndMessages(null);worker.shutdownNow();releasePlayer();super.onDestroy();}
 }
