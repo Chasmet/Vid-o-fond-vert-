@@ -44,6 +44,45 @@
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="24dp"
+            app:strokeColor="@color/accent"
+            app:strokeWidth="1dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:padding="20dp">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="CONNEXION CHATGPT · MCP" android:textColor="@color/accent"
+                    android:fontFamily="sans-serif-black" android:textSize="18sp"/>
+                <TextView android:id="@+id/mcpConnectionStatus" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="10dp"
+                    android:text="Vérification…" android:textColor="@color/ink" android:textSize="15sp"/>
+                <TextView android:id="@+id/mcpServerAddress" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:textColor="@color/ink_secondary" android:textSize="12sp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/mcpManageButton"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:text="Associer ChatGPT"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/mcpReconnectButton"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="Reconnecter le service"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/mcpBatteryButton"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="Optimisation batterie"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/mcpAppSettingsButton"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="Réglages Android de l’application"/>
+                <TextView android:id="@+id/mcpBatteryStatus" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:textColor="@color/ink_secondary" android:textSize="13sp"
+                    android:text="Autorise l’exécution en arrière-plan pour maintenir la connexion. Un arrêt forcé Android interrompt le service."/>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:textColor="@color/ink_secondary" android:textSize="13sp"
+                    android:text="Les modèles IA existants sont conservés. Seuls les modèles manquants seront téléchargés lors de leur utilisation."/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
             app:cardBackgroundColor="@color/surface"
             app:cardCornerRadius="24dp"
