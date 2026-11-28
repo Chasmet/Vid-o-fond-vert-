@@ -32,3 +32,6 @@ Whisper Turbo sans UVR par défaut (nouveaux réglages modifiables), décodage g
 
 ## v1.15.7
 Ajout direct par saisie début/fin sans déplacer le curseur, duplication de refrain/couplet, navigation vers un horaire exact et retour automatique au panneau d'édition à la sélection. Correctifs de compatibilité API anciennes et de cycle de vie du lecteur. Les modèles inclus et l'export restent inchangés.
+
+## v1.15.8 — MCP CHK Universal Control
+Connexion volontaire au serveur HTTPS existant via invitation `/api/onboard`, pas de Render supplémentaire. Le client utilise `/api/agent/{id}/poll` et `/result` seulement quand le prompteur est au premier plan. Secrets d'association dans noBackupFilesDir, aucune clé intégrée à l'APK. Commandes `prompter_status`, `lyrics_list` (offset/limit), `lyrics_add` (start_ms,end_ms,text,revision), `lyrics_update` (index et champs modifiés, revision), `lyrics_delete` (index,revision), `lyrics_restore` (revision), `prompter_seek` (position_ms), `prompter_play` (play,position_ms), `prompter_open_camera`, `lyrics_export_pdf`. Les écritures passent par l'autorisation du serveur, vérification de révision, sauvegarde locale; caméra et PDF nécessitent validation locale. Aucun transfert audio ou vidéo; aucune capture distante. Une tâche interrompue est signalée comme incertaine. Association et test bout en bout requis sur téléphone.

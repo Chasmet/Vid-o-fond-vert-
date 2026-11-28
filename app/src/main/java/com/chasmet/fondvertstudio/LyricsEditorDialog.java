@@ -180,6 +180,7 @@ final class LyricsEditorDialog {
     }
     private void finish(){saved.accept(LyricsTimeline.copy(rows));dialog.dismiss();}
     private void closeRequest(){if(!dirty&&!pending()){dialog.dismiss();return;}new AlertDialog.Builder(context).setTitle("Modifications non enregistrées").setItems(new String[]{"Enregistrer","Abandonner les modifications","Continuer la correction"},(d,i)->{if(i==0)commitAll();else if(i==1)dialog.dismiss();}).show();}
+    boolean isShowing(){return dialog.isShowing();}
     void pausePlayback(){if(ready&&player!=null){try{player.pause();play.setText("Lecture");stopAt=-1;}catch(Exception ignored){}}}
     void dispose(){if(dialog.isShowing())dialog.dismiss();else release();}
     private void release(){closed=true;handler.removeCallbacksAndMessages(null);if(player!=null){player.release();player=null;}}
