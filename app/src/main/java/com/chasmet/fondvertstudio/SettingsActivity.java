@@ -1,6 +1,17 @@
 package com.chasmet.fondvertstudio;
 
 import android.content.SharedPreferences;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.PowerManager;
+import android.provider.Settings;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.Toast;
+import androidx.appcompat.app.AlertDialog;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.View;
@@ -37,11 +48,17 @@ public final class SettingsActivity extends AppCompatActivity {
     private AppUpdateManager.UpdateInfo latestInfo;
     private File pendingApk;
     private boolean waitingForInstallPermission;
+    private PrompterMcpClient mcp;
+    private final Handler mcpUi=new Handler(Looper.getMainLooper());
+    private TextView mcpStatus,mcpAddress,mcpBattery;
+    private MaterialButton mcpManage,mcpReconnect;
+    private final Runnable mcpRefresh=new Runnable(){public void run(){refreshMcp();mcpUi.postDelayed(this,2000);}};
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
+        setupMcp();
 
         currentVersionText = findViewById(R.id.currentVersionText);
         updateStatusText = findViewById(R.id.updateStatusText);
@@ -80,6 +97,7 @@ public final class SettingsActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if(mcp!=null){mcpUi.removeCallbacks(mcpRefresh);mcpUi.post(mcpRefresh);}
         if (waitingForInstallPermission && pendingApk != null) {
             waitingForInstallPermission = false;
             updateStatusText.setText("Vérification de l'autorisation d'installation…");
@@ -90,6 +108,64 @@ public final class SettingsActivity extends AppCompatActivity {
                         "L'autorisation d'installation est nécessaire pour appliquer la mise à jour.");
             }
         }
+    }
+
+    @Override protected void onPause(){mcpUi.removeCallbacks(mcpRefresh);super.onPause();}
+    private void setupMcp(){
+        mcp=PrompterMcpService.client(this);
+        mcpStatus=findViewById(R.id.mcpConnectionStatus);mcpAddress=findViewById(R.id.mcpServerAddress);mcpBattery=findViewById(R.id.mcpBatteryStatus);
+        mcpManage=findViewById(R.id.mcpManageButton);mcpReconnect=findViewById(R.id.mcpReconnectButton);
+        mcpManage.setOnClickListener(v->manageMcp());
+        mcpReconnect.setOnClickListener(v->{if(mcp.paired()&&mcp.enabled())startMcp();});
+        findViewById(R.id.mcpBatteryButton).setOnClickListener(v->{
+            if(Build.VERSION.SDK_INT>=23){try{startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}catch(Exception e){openAppSettings();}}
+            else openAppSettings();
+        });
+        findViewById(R.id.mcpAppSettingsButton).setOnClickListener(v->openAppSettings());
+        refreshMcp();
+    }
+    private void openAppSettings(){startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName())));}
+    private void refreshMcp(){
+        if(mcp==null)return;
+        mcpStatus.setText(mcp.status()+" · service "+(PrompterMcpService.running()?"actif":"arrêté"));
+        mcpAddress.setText(mcp.paired()?mcp.base():"Aucun serveur associé");
+        mcpManage.setText(mcp.paired()?"Gérer la connexion":"Associer ChatGPT");
+        mcpReconnect.setEnabled(mcp.paired()&&mcp.enabled());
+        boolean exempt=Build.VERSION.SDK_INT<23||((PowerManager)getSystemService(POWER_SERVICE)).isIgnoringBatteryOptimizations(getPackageName());
+        mcpBattery.setText((exempt?"Optimisation batterie désactivée.":"Autorise Fond Vert Studio à fonctionner sans restriction de batterie.")+" Sur HONOR, autorise aussi les trois options de lancement manuel. Un arrêt forcé Android interrompt le service.");
+    }
+    private void startMcp(){
+        try{
+            PrompterMcpService.start(this);
+            if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED
+                    &&!getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean("mcp_notification_requested",false)){
+                getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("mcp_notification_requested",true).apply();
+                requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},1701);
+            }
+        }catch(Exception e){Toast.makeText(this,"Service MCP : "+e.getMessage(),Toast.LENGTH_LONG).show();}
+        refreshMcp();
+    }
+    private void manageMcp(){
+        if(mcp.paired()){
+            String[] options={mcp.enabled()?"Désactiver le pilotage":"Activer le pilotage","Dissocier ce téléphone"};
+            new AlertDialog.Builder(this).setTitle("Connexion ChatGPT").setItems(options,(d,i)->{
+                if(i==0){boolean on=!mcp.enabled();mcp.setEnabled(on);if(on)startMcp();else PrompterMcpService.stop(this);refreshMcp();}
+                else new AlertDialog.Builder(this).setTitle("Dissocier ?").setMessage("Le pilotage distant sera arrêté. Les paroles et médias sont conservés.")
+                    .setNegativeButton("Annuler",null).setPositiveButton("Dissocier",(q,w)->mcp.unlink((ok,msg)->{PrompterMcpService.stop(this);refreshMcp();Toast.makeText(this,msg,Toast.LENGTH_LONG).show();})).show();
+            }).setNegativeButton("Fermer",null).show();return;
+        }
+        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(24,8,24,8);
+        TextView help=new TextView(this);help.setText("Invitation CHK à usage unique et adresse HTTPS du serveur.");box.addView(help);
+        EditText url=new EditText(this);url.setSingleLine(true);url.setHint("Adresse HTTPS /mcp");url.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);url.setText(mcp.base());box.addView(url);
+        EditText invite=new EditText(this);invite.setSingleLine(true);invite.setHint("Invitation chkinvite_…");invite.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);box.addView(invite);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Associer ChatGPT").setView(box).setNegativeButton("Annuler",null).setPositiveButton("Associer",null).create();
+        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+            mcp.pair(url.getText().toString(),invite.getText().toString(),(ok,msg)->{
+                if(isFinishing()||isDestroyed())return;
+                if(ok){dialog.dismiss();startMcp();Toast.makeText(this,msg,Toast.LENGTH_LONG).show();}
+                else{invite.setError(msg);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);}
+            });
+        }));dialog.show();
     }
 
     private void checkForUpdate() {
