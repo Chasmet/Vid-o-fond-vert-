@@ -15,6 +15,19 @@ public final class PrompterMcpService extends Service {
     private static PrompterMcpService service;
     private static BackgroundPrompter backend;
     private static McpTranscriptionJob analysis;
+    private final Handler monitor=new Handler(Looper.getMainLooper());
+    private String lastNotice="";
+    private final Runnable monitorTick=new Runnable(){public void run(){
+        if(service!=PrompterMcpService.this)return;
+        String status=client(PrompterMcpService.this).status();
+        if(!status.equals(lastNotice)){lastNotice=status;NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);try{nm.notify(1608,notification(status));}catch(SecurityException ignored){}}
+        monitor.postDelayed(this,10000);
+    }};
+    static boolean running(){return service!=null;}
+    static void startIfEnabled(Context c){
+        PrompterMcpClient client=client(c);
+        if(client.enabled()&&client.paired())try{start(c);}catch(RuntimeException ignored){}
+    }
     static PrompterMcpClient client(Context c){
         if(client==null){
             Context app=c.getApplicationContext();backend=new BackgroundPrompter(app);analysis=new McpTranscriptionJob(app,backend);
@@ -78,7 +91,7 @@ public final class PrompterMcpService extends Service {
         PrompterMcpClient c=client(this);
         if(intent!=null&&STOP.equals(intent.getAction())){c.setEnabled(false);stopSelf();return START_NOT_STICKY;}
         if(!c.enabled()||!c.paired()){stopSelf();return START_NOT_STICKY;}
-        c.resume();return START_STICKY;
+        c.resume();monitor.removeCallbacks(monitorTick);monitor.post(monitorTick);return START_STICKY;
     }
     private void showRequest(String action){
         NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
@@ -86,6 +99,7 @@ public final class PrompterMcpService extends Service {
         nm.notify(1608,notification(action.equals("prompter_open_camera")?"Demande caméra · ouvrir et confirmer":"Demande PDF · ouvrir et confirmer"));
     }
     @Override public void onDestroy(){
+        monitor.removeCallbacksAndMessages(null);
         if(client!=null)client.pause();if(analysis!=null)analysis.cancel();if(backend!=null)backend.release();service=null;stopForeground(true);super.onDestroy();
     }
     @Override public IBinder onBind(Intent intent){return null;}

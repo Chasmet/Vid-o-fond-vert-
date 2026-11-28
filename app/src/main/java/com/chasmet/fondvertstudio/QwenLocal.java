@@ -30,16 +30,20 @@ final class QwenLocal {
     }
     private static void check(Listener l)throws InterruptedException{if(l.abort()||Thread.currentThread().isInterrupted())throw new InterruptedException();}
     private static void delete(File f){if(f.isDirectory()){File[] list=f.listFiles();if(list!=null)for(File child:list)delete(child);}f.delete();}
-    static void ensure(Context c,Listener l)throws Exception{
+    static synchronized void ensure(Context c,Listener l)throws Exception{
         if(!supported())throw new IOException("Qwen nécessite Android 8 ou plus récent. Utilise Whisper.");
         if(ready(c))return;
-        if(c.getFilesDir().getUsableSpace()<1300000000L)throw new IOException("Libère au moins 1,3 Go pour préparer les modèles Qwen inclus dans l’APK.");
+        if(c.getFilesDir().getUsableSpace()<2250000000L)throw new IOException("Libère au moins 2,25 Go pour télécharger et préparer Qwen une seule fois.");
         File dest=folder(c), stage=new File(c.getFilesDir(),"qwen3-asr-06-install");
         delete(stage); if(!stage.mkdirs())throw new IOException("Dossier modèle indisponible");
+        File archive=null;
         try{
-            l.status("Préparation locale de Qwen inclus dans l’application…");
+            l.status("Téléchargement unique de Qwen si absent…");
+            archive=File.createTempFile("qwen-",".tar.bz2",c.getFilesDir());
+            ModelSource.fetch(c,ModelSource.QWEN,archive,n->l.status("Qwen : "+n/1000000+" / 879 Mo"),l::abort);
+            l.status("Préparation locale de Qwen…");
             Set<String> allowed=new HashSet<>(Arrays.asList(REQUIRED));long unpacked=0,last=0;
-            try(TarArchiveInputStream tar=new TarArchiveInputStream(new BZip2CompressorInputStream(new BufferedInputStream(c.getAssets().open("models/"+ARCHIVE+".tar.bz2"))))){
+            try(TarArchiveInputStream tar=new TarArchiveInputStream(new BZip2CompressorInputStream(new BufferedInputStream(new FileInputStream(archive))))){
                 TarArchiveEntry entry;byte[] buf=new byte[65536];
                 while((entry=tar.getNextTarEntry())!=null){
                     check(l);String name=entry.getName();while(name.startsWith("./"))name=name.substring(2);
@@ -54,7 +58,7 @@ final class QwenLocal {
             for(String name:REQUIRED){File m=new File(stage,name);if(!m.isFile()||m.length()==0)throw new IOException("Composant Qwen manquant : "+name);}
             try(FileOutputStream out=new FileOutputStream(new File(stage,".verified"))){out.write(SHA06.getBytes("UTF-8"));}
             delete(dest);if(!stage.renameTo(dest))throw new IOException("Impossible de finaliser Qwen");
-        }finally{delete(stage);}
+        }finally{delete(stage);if(archive!=null)archive.delete();}
     }
     static String[] transcribe(Context c,float[] pcm,int threads,Listener l)throws Exception{
         ensure(c,l);check(l);File d=folder(c);

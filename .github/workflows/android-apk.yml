@@ -206,17 +206,16 @@ jobs:
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Vérifier les trois modèles embarqués
+      - name: Vérifier l'APK allégé et le stockage indépendant des modèles
         shell: bash
         run: |
           python3 - <<'PY'
-          import zipfile, pathlib
+          import pathlib, zipfile
           apk=pathlib.Path("app/build/outputs/apk/release/app-release.apk")
-          assert apk.stat().st_size < 2*1024**3, "GitHub Release limit"
+          assert apk.stat().st_size < 250*1024**2, "APK allégé trop volumineux"
           with zipfile.ZipFile(apk) as z:
-              for name, size in [("sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2",878702423),("UVR-MDX-NET-Voc_FT.onnx",66762795),("ggml-large-v3-turbo-q5_0.bin",574041195)]:
-                  assert z.getinfo("assets/models/"+name).file_size == size, name
-          print("Offline APK validated:", apk.stat().st_size)
+              assert not any(n.startswith("assets/models/") for n in z.namelist()), "Model weights unexpectedly embedded"
+          print("Light APK validated:", apk.stat().st_size)
           PY
 
       - name: Vérifier les APK finaux

@@ -70,14 +70,6 @@ final class McpTranscriptionJob {
     }
     private void check()throws InterruptedException{if(cancel||Thread.currentThread().isInterrupted())throw new InterruptedException();}
     private File ensureWhisper()throws Exception{
-        File dst=new File(app.getFilesDir(),"ggml-large-v3-turbo-q5_0.bin");if(dst.isFile()&&dst.length()>=570000000L)return dst;
-        if(app.getFilesDir().getUsableSpace()<650000000L)throw new IOException("650 Mo libres nécessaires");
-        File part=File.createTempFile("mcp-whisper-", ".part",app.getFilesDir());MessageDigest md=MessageDigest.getInstance("SHA-1");
-        try{
-            try(InputStream in=app.getAssets().open("models/ggml-large-v3-turbo-q5_0.bin");OutputStream out=new BufferedOutputStream(new FileOutputStream(part))){byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1){check();out.write(b,0,n);md.update(b,0,n);}}
-            StringBuilder h=new StringBuilder();for(byte b:md.digest())h.append(String.format(Locale.US,"%02x",b&255));
-            if(!h.toString().equals("e050f7970618a659205450ad97eb95a18d69c9ee"))throw new IOException("Intégrité du modèle incorrecte");
-            if(dst.exists()&&!dst.delete())throw new IOException("Modèle inaccessible");if(!part.renameTo(dst))throw new IOException("Installation impossible");return dst;
-        }finally{part.delete();}
+        return ModelSource.ensureFile(app,ModelSource.WHISPER,n->{phase="Whisper : "+n/1000000+" / 574 Mo";},()->cancel);
     }
 }
