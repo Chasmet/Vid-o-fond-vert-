@@ -70,6 +70,6 @@ final class McpTranscriptionJob {
     }
     private void check()throws InterruptedException{if(cancel||Thread.currentThread().isInterrupted())throw new InterruptedException();}
     private File ensureWhisper()throws Exception{
-        return ModelSource.ensureFile(app,ModelSource.WHISPER,n->{},()->cancel);
+        return ModelSource.ensureFile(app,ModelSource.WHISPER,n->{phase="Whisper : "+n/1000000+" / 574 Mo";},()->cancel);
     }
 }
