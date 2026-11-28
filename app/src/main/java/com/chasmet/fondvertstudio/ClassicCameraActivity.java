@@ -762,9 +762,9 @@ public final class ClassicCameraActivity extends AppCompatActivity {
     private void renderPrompter(int positionMs){
         if(prompterOverlay==null)return;
         if(prompterLines==null||prompterLines.length()==0){prompterOverlay.setText("Musique originale · sans paroles");return;}
-        int active=-1;long t=(long)positionMs+prompterLead;
-        for(int i=0;i<prompterLines.length();i++){org.json.JSONArray l=prompterLines.optJSONArray(i);if(l!=null&&l.optLong(0)<=t)active=i;else break;}
-        org.json.JSONArray line=prompterLines.optJSONArray(active),nextLine=prompterLines.optJSONArray(active+1);
+        int active=-1,upcoming=-1;long t=(long)positionMs+prompterLead;
+        for(int i=0;i<prompterLines.length();i++){org.json.JSONArray l=prompterLines.optJSONArray(i);if(l==null)continue;if(l.optLong(0)>t){upcoming=i;break;}if(t<l.optLong(1))active=i;}
+        org.json.JSONArray line=prompterLines.optJSONArray(active),nextLine=prompterLines.optJSONArray(upcoming);
         String first=line==null?"Prépare-toi…":line.optString(2);String second=nextLine==null?"":nextLine.optString(2);
         String combined=first+(second.isEmpty()?"":"\n\n"+second);
         android.text.SpannableString styled=new android.text.SpannableString(combined);

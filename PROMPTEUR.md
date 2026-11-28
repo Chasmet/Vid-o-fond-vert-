@@ -26,3 +26,6 @@ Caméra en haut de l'écran, avant/arrière et vertical/horizontal, accessible s
 
 ## v1.15.5
 Whisper Turbo sans UVR par défaut (nouveaux réglages modifiables), décodage greedy à un candidat, Qwen par fenêtres de 12 s. Les trois modèles restent embarqués. Exports PDF détaillé, TXT, SRT et WebVTT UTF-8 avec début/fin corrigibles. Partage via Android. Les horaires Qwen restent approximatifs; aucun alignement mot par mot ni gain de vitesse garanti avant mesure sur téléphone.
+
+## v1.15.6 — éditeur de paroles
+Éditeur plein écran non destructif, lecture et curseur au millième, saisie 01:04.000 / 64,000 s / 64000 ms, ajustement début/fin ±100 ms, marquage à la position de lecture, écoute du passage, ajout de passages et de couplets (option de répartition temporelle approximative par ligne), scission au curseur audio et texte, suppression et annulation. Enregistrement explicite dans le projet existant, compatible caméra/PDF/TXT/SRT/VTT. Les périodes sans paroles ne prolongent plus le passage précédent. Pas de modification des modèles ni de signature. Les horaires manuels restent à vérifier à l'écoute.
