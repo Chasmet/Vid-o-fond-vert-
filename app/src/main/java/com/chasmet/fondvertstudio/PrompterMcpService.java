@@ -20,7 +20,7 @@ public final class PrompterMcpService extends Service {
     private final Runnable monitorTick=new Runnable(){public void run(){
         if(service!=PrompterMcpService.this)return;
         String status=client(PrompterMcpService.this).status();
-        if(!status.equals(lastNotice)){lastNotice=status;NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);nm.notify(1608,notification(status));}
+        if(!status.equals(lastNotice)){lastNotice=status;NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);try{nm.notify(1608,notification(status));}catch(SecurityException ignored){}}
         monitor.postDelayed(this,10000);
     }};
     static boolean running(){return service!=null;}
@@ -102,6 +102,5 @@ public final class PrompterMcpService extends Service {
         monitor.removeCallbacksAndMessages(null);
         if(client!=null)client.pause();if(analysis!=null)analysis.cancel();if(backend!=null)backend.release();service=null;stopForeground(true);super.onDestroy();
     }
-    @Override public void onTaskRemoved(Intent rootIntent){super.onTaskRemoved(rootIntent);}
     @Override public IBinder onBind(Intent intent){return null;}
 }
