@@ -151,6 +151,7 @@ public final class ModeChooserActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        PrompterMcpService.startIfEnabled(this);
         if (updateBadge != null) refreshUpdateBadge();
         if (resumeProjectCard != null) refreshProjectCard();
     }
