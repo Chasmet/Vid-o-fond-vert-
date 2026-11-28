@@ -20,7 +20,7 @@ Java_com_chasmet_fondvertstudio_LocalWhisper_transcribe(JNIEnv *env, jclass, jst
     params.no_timestamps = false;
     params.no_context = false;
     params.suppress_blank = true;
-    params.greedy.best_of = 2;
+    params.greedy.best_of = 1; // Turbo: avoid parallel candidate decoding.
     struct ProgressData { JavaVM *vm; jobject object; jmethodID method; jmethodID abortMethod; };
     ProgressData data{};
     env->GetJavaVM(&data.vm);

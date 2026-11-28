@@ -60,7 +60,7 @@ final class QwenLocal {
         ensure(c,l);check(l);File d=folder(c);
         OfflineQwen3AsrModelConfig q=new OfflineQwen3AsrModelConfig();
         q.setConvFrontend(new File(d,REQUIRED[0]).getAbsolutePath());q.setEncoder(new File(d,REQUIRED[1]).getAbsolutePath());q.setDecoder(new File(d,REQUIRED[2]).getAbsolutePath());q.setTokenizer(new File(d,"tokenizer").getAbsolutePath());
-        q.setMaxTotalLen(512);q.setMaxNewTokens(128);
+        q.setMaxTotalLen(512);q.setMaxNewTokens(192);
         OfflineModelConfig model=new OfflineModelConfig();model.setQwen3Asr(q);model.setNumThreads(Math.max(1,Math.min(6,threads)));model.setProvider("cpu");model.setDebug(false);
         FeatureConfig feat=new FeatureConfig();feat.setSampleRate(16000);feat.setFeatureDim(128);
         OfflineRecognizerConfig config=new OfflineRecognizerConfig();config.setModelConfig(model);config.setFeatConfig(feat);
@@ -68,7 +68,7 @@ final class QwenLocal {
         OfflineRecognizer recognizer=new OfflineRecognizer(null,config);
         ArrayList<String> output=new ArrayList<>();
         try{
-            final int window=16000*8;
+            final int window=16000*12;
             for(int start=0;start<pcm.length;start+=window){
                 check(l);int end=Math.min(start+window,pcm.length);float[] chunk=Arrays.copyOfRange(pcm,start,end);
                 l.status("Qwen · passage "+(start/window+1)+" / "+((pcm.length+window-1)/window));

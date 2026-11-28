@@ -32,7 +32,9 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private int analysisProgress=-1;
     private TextView fileInfo,backingInfo;
     private ProgressBar progress;
-    private Button camera, pdfExport;
+    private Button camera, pdfExport, subtitleExport;
+    private static final int REQUEST_TRANSCRIPT=42;
+    private String pendingExportText, pendingExportMime;
     private TextView cameraHint;
     private boolean cameraAfterCancel;
     private static final int REQUEST_LYRICS_PDF=41;
@@ -72,19 +74,21 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         camera.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff087b59));
         cameraHint=label("Importe un morceau pour ouvrir la caméra.",13,0xffb4bbc3);
         pdfExport=button("Exporter les paroles en PDF",()->choosePdf());
+        subtitleExport=button("Exporter transcription / sous-titres",()->chooseTranscript());
         backingInfo=label("Instrumental : aucun",13,0xffb4bbc3);
         pick=button("Importer un audio / vidéo",()->choose(1));
         pickBacking=button("Importer instrumental (facultatif)",()->choose(2));
         vocalInfo=label("Source de transcription : morceau original",13,0xffb4bbc3);
         pickVocal=button("Importer voix studio seule (facultatif)",()->choose(3));
         clearVocal=button("Analyser le morceau original",()->{if(busy)return;vocal=null;vocalPlayable=null;save();refresh();});
-        isolateVoice=new CheckBox(this);isolateVoice.setText("Isoler automatiquement la voix (UVR inclus)");isolateVoice.setTextColor(0xffffffff);isolateVoice.setChecked(QwenLocal.supported()&&getSharedPreferences("music_prompter",0).getBoolean("isolate_voice",true));root.addView(isolateVoice);isolateVoice.setOnCheckedChangeListener((v,checked)->getSharedPreferences("music_prompter",0).edit().putBoolean("isolate_voice",checked).apply());
+        isolateVoice=new CheckBox(this);isolateVoice.setText("Isoler la voix (UVR) · plus lent");isolateVoice.setTextColor(0xffffffff);isolateVoice.setChecked(QwenLocal.supported()&&getSharedPreferences("music_prompter",0).getBoolean("isolate_voice_v2",false));root.addView(isolateVoice);isolateVoice.setOnCheckedChangeListener((v,checked)->getSharedPreferences("music_prompter",0).edit().putBoolean("isolate_voice_v2",checked).apply());
         label("Moteur de transcription",16,0xffffffff);
+        label("Pour aller plus vite : Whisper Turbo, sans UVR. La voix studio seule améliore la reconnaissance sans séparation.",13,0xffb4bbc3);
         engineChoice=new android.widget.RadioGroup(this);engineChoice.setOrientation(LinearLayout.VERTICAL);
-        android.widget.RadioButton q=new android.widget.RadioButton(this);q.setId(View.generateViewId());q.setText(QwenLocal.supported()?"Qwen3-ASR 0.6B · chant / musique":"Qwen3-ASR · Android 8 minimum");q.setTextColor(0xffffffff);engineChoice.addView(q);
-        android.widget.RadioButton wh=new android.widget.RadioButton(this);wh.setId(View.generateViewId());wh.setText("Whisper Large V3 Turbo · secours");wh.setTextColor(0xffffffff);engineChoice.addView(wh);
-        root.addView(engineChoice);useQwen=QwenLocal.supported()&&getSharedPreferences("music_prompter",0).getBoolean("use_qwen",true);engineChoice.check(useQwen?q.getId():wh.getId());
-        engineChoice.setOnCheckedChangeListener((group,checked)->{useQwen=QwenLocal.supported()&&checked==q.getId();getSharedPreferences("music_prompter",0).edit().putBoolean("use_qwen",useQwen).apply();});
+        android.widget.RadioButton q=new android.widget.RadioButton(this);q.setId(View.generateViewId());q.setText(QwenLocal.supported()?"Qwen3-ASR 0.6B · alternative chant / musique":"Qwen3-ASR · Android 8 minimum");q.setTextColor(0xffffffff);engineChoice.addView(q);
+        android.widget.RadioButton wh=new android.widget.RadioButton(this);wh.setId(View.generateViewId());wh.setText("Whisper Large V3 Turbo · mode rapide");wh.setTextColor(0xffffffff);engineChoice.addView(wh);
+        root.addView(engineChoice);useQwen=QwenLocal.supported()&&getSharedPreferences("music_prompter",0).getBoolean("use_qwen_v2",false);engineChoice.check(useQwen?q.getId():wh.getId());
+        engineChoice.setOnCheckedChangeListener((group,checked)->{useQwen=QwenLocal.supported()&&checked==q.getId();getSharedPreferences("music_prompter",0).edit().putBoolean("use_qwen_v2",useQwen).apply();});
         analyze=button("Extraire les paroles",()->confirmAnalysis());
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setMax(100);progress.setVisibility(View.GONE);root.addView(progress,new LinearLayout.LayoutParams(-1,-2));
         cancelAnalysis=button("Annuler la transcription",()->{cancelled=true;phase="Annulation…";cancelAnalysis.setEnabled(false);});
@@ -108,10 +112,10 @@ public final class MusicPrompterActivity extends AppCompatActivity {
         });
         button("Écouter le morceau original",()->{if(!busy)prepare(music());});
         button("Utiliser l'instrumental",()->{if(busy)return;if(backing!=null)prepare(instrumental());else status.setText("Importe d'abord ton instrumental.");});
-        load();if(b!=null){pendingPdfTitle=b.getString("pdf_title");pendingPdfText=b.getString("pdf_text");}advance.setProgress(lead/100);refresh();ui.post(tick);
+        load();if(b!=null){pendingPdfTitle=b.getString("pdf_title");pendingPdfText=b.getString("pdf_text");pendingExportText=b.getString("export_text");pendingExportMime=b.getString("export_mime");}advance.setProgress(lead/100);refresh();ui.post(tick);
     }
     private void choose(int request){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("*/*");i.addCategory(Intent.CATEGORY_OPENABLE);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(i,request);}
-    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null||data.getData()==null)return;Uri u=data.getData();if(request==REQUEST_LYRICS_PDF){writePdf(u);return;}try{getContentResolver().takePersistableUriPermission(u,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception e){status.setText("Accès durable indisponible : "+e.getMessage());return;}
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null||data.getData()==null)return;Uri u=data.getData();if(request==REQUEST_LYRICS_PDF){writePdf(u);return;}if(request==REQUEST_TRANSCRIPT){writeTranscript(u);return;}try{getContentResolver().takePersistableUriPermission(u,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception e){status.setText("Accès durable indisponible : "+e.getMessage());return;}
         if(request==1){if(!lines.isEmpty()){new AlertDialog.Builder(this).setTitle("Remplacer le morceau actuel ?").setMessage("Les paroles du morceau actuel seront remplacées.").setNegativeButton("Annuler",null).setPositiveButton("Remplacer",(d,w)->setSource(u)).show();}else setSource(u);}
         else if(request==2){importTrack(u,2);}
         else if(request==3){if(source==null){status.setText("Importe d’abord ton morceau original.");return;}importTrack(u,3);}
@@ -170,10 +174,10 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     }
     private void choosePdf(){
         if(lines.isEmpty()){Toast.makeText(this,"Aucune parole enregistrée à exporter.",Toast.LENGTH_SHORT).show();return;}
-        new AlertDialog.Builder(this).setTitle("Exporter toutes les paroles").setItems(new String[]{"Paroles seules","Paroles et horaires"},(d,i)->{
+        new AlertDialog.Builder(this).setTitle("Exporter toutes les paroles").setItems(new String[]{"Paroles seules","Transcription détaillée (début et fin)"},(d,i)->{
             String title=fileName(source).replaceFirst("\\.[^.]+$","");
             StringBuilder content=new StringBuilder();
-            for(Line line:lines){if(i==1)content.append(String.format(Locale.FRANCE,"%02d:%02d.%03d  ",line.start/60000,(line.start/1000)%60,line.start%1000));content.append(line.text).append("\n\n");}
+            for(Line line:lines){if(i==1)content.append(TranscriptExporter.timestamp(line.start,'.')).append(" → ").append(TranscriptExporter.timestamp(line.end,'.')).append("\n");content.append(line.text).append("\n\n");}
             pendingPdfTitle=title;pendingPdfText=content.toString().trim();
             Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/pdf");
@@ -191,16 +195,49 @@ public final class MusicPrompterActivity extends AppCompatActivity {
                 LyricsPdfExporter.write(out,title,text);
                 ui.post(()->{if(!dead)new AlertDialog.Builder(this).setTitle("PDF enregistré").setMessage("Toutes les paroles sont dans le document choisi.").setPositiveButton("Ouvrir",(d,w)->{
                     try{startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(target,"application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));}catch(android.content.ActivityNotFoundException e){Toast.makeText(this,"PDF enregistré. Aucun lecteur PDF installé.",Toast.LENGTH_LONG).show();}
-                }).setNegativeButton("Fermer",null).show();});
+                }).setNeutralButton("Partager",(d,w)->shareExport(target,"application/pdf")).setNegativeButton("Fermer",null).show();});
             }catch(Exception e){ui.post(()->{if(!dead)Toast.makeText(this,"Export PDF impossible : "+e.getMessage(),Toast.LENGTH_LONG).show();});}
         },"lyrics-pdf").start();
     }
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("pdf_title",pendingPdfTitle);state.putString("pdf_text",pendingPdfText);}
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("pdf_title",pendingPdfTitle);state.putString("pdf_text",pendingPdfText);state.putString("export_text",pendingExportText);state.putString("export_mime",pendingExportMime);}
+    private void chooseTranscript(){
+        if(lines.isEmpty())return;
+        String[] names={"SRT · sous-titres universels","VTT · sous-titres Web","TXT · transcription détaillée","TXT · paroles seules"};
+        new AlertDialog.Builder(this).setTitle("Exporter les paroles corrigées").setItems(names,(dialog,index)->{
+            ArrayList<TranscriptExporter.Cue> cues=new ArrayList<>();
+            for(Line l:lines)cues.add(new TranscriptExporter.Cue(l.start,l.end,l.text));
+            String title=fileName(source).replaceFirst("\\.[^.]+$","");
+            String[] exts={"srt","vtt","txt","txt"};
+            String[] mimes={"application/x-subrip","text/vtt","text/plain","text/plain"};
+            pendingExportText=TranscriptExporter.format(cues,index,title);
+            pendingExportMime=mimes[index];
+            Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(pendingExportMime);
+            intent.putExtra(Intent.EXTRA_TITLE,title+(index==2?" - transcription":index==3?" - paroles":" - sous-titres")+"."+exts[index]);
+            try{startActivityForResult(intent,REQUEST_TRANSCRIPT);}catch(android.content.ActivityNotFoundException e){pendingExportText=null;pendingExportMime=null;Toast.makeText(this,"Aucun gestionnaire de fichiers disponible.",Toast.LENGTH_LONG).show();}
+        }).show();
+    }
+    private void writeTranscript(Uri target){
+        final String content=pendingExportText,mime=pendingExportMime;
+        pendingExportText=null;pendingExportMime=null;
+        if(content==null||mime==null){Toast.makeText(this,"Sélectionne de nouveau le format.",Toast.LENGTH_LONG).show();return;}
+        new Thread(()->{
+            try(OutputStream out=getContentResolver().openOutputStream(target,"w")){
+                if(out==null)throw new IOException("Destination inaccessible");
+                out.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));out.flush();
+                ui.post(()->{if(!dead)new AlertDialog.Builder(this).setTitle("Export enregistré").setMessage("Fichier UTF-8 prêt à être importé dans une autre application. Les horaires restent à vérifier.").setNegativeButton("Fermer",null).setPositiveButton("Partager",(d,w)->shareExport(target,mime)).show();});
+            }catch(Exception e){ui.post(()->{if(!dead)Toast.makeText(this,"Export impossible : "+e.getMessage(),Toast.LENGTH_LONG).show();});}
+        },"lyrics-export").start();
+    }
+    private void shareExport(Uri uri,String mime){
+        Intent send=new Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM,uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        send.setClipData(android.content.ClipData.newRawUri("Export",uri));
+        try{startActivity(Intent.createChooser(send,"Partager le fichier"));}catch(android.content.ActivityNotFoundException e){Toast.makeText(this,"Fichier enregistré.",Toast.LENGTH_SHORT).show();}
+    }
     private void finishCameraRequest(){if(cameraAfterCancel){cameraAfterCancel=false;openCamera();}}
     private File model(){return new File(getFilesDir(),"ggml-large-v3-turbo-q5_0.bin");}
     private void confirmAnalysis(){if(source==null||busy)return;if(!QwenLocal.supported())useQwen=false;runAnalysis();}
-    private void message(String s){ui.post(()->{if(!dead){if(analyzing){phase=s;analysisProgress=-1;}status.setText(s);}});}
-    private void reportProgress(int value){ui.post(()->{if(dead||!analyzing||cancelled)return;analysisProgress=Math.max(analysisProgress,Math.min(100,Math.max(0,value)));phase=useQwen?"Transcription Qwen3-ASR":"Transcription Large V3 Turbo";progress.setIndeterminate(analysisProgress==0);if(analysisProgress>0)progress.setProgress(analysisProgress);});}
+    private void message(String s){ui.post(()->{if(!dead){if(analyzing){phase=s;}status.setText(s);}});}
+    private void reportProgress(int value){ui.post(()->{if(dead||!analyzing||cancelled)return;analysisProgress=Math.max(analysisProgress,Math.min(100,Math.max(0,value)));if(!useQwen)phase="Transcription Large V3 Turbo";progress.setIndeterminate(analysisProgress==0);if(analysisProgress>0)progress.setProgress(analysisProgress);});}
     private void ensureModel() throws Exception {
         File dst=model();if(dst.isFile()&&dst.length()>=MODEL_MIN_BYTES)return;
         if(getFilesDir().getUsableSpace()<650000000L)throw new IOException("Libère 650 Mo pour préparer Whisper.");
@@ -268,8 +305,8 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private final Runnable tick=new Runnable(){public void run(){if(dead)return;if(analyzing){status.setText(phase+(analysisProgress>0?" · "+analysisProgress+" %":"")+" · "+duration(SystemClock.elapsedRealtime()-startedAt));}if(player!=null&&!drag){try{int t=player.getCurrentPosition();seek.setProgress(t);render(t);}catch(Exception ignored){}}ui.postDelayed(this,80);}};
     private void render(long t){clock.setText(duration(t)+" / "+duration(player==null?0:player.getDuration()));long at=t+lead;active=-1;for(int i=0;i<lines.size();i++){if(lines.get(i).start<=at)active=i;else break;}current.setText(active<0?"Prépare-toi…":lines.get(active).text);next.setText(active+1<lines.size()?lines.get(active+1).text:"");}
     private void editLines(){if(lines.isEmpty())return;String[] choices=new String[lines.size()];for(int i=0;i<lines.size();i++)choices[i]=String.format(Locale.FRANCE,"%.2f s · %s",lines.get(i).start/1000f,lines.get(i).text);new AlertDialog.Builder(this).setTitle("Choisir un passage").setItems(choices,(d,i)->editLine(i)).setNegativeButton("Fermer",null).show();}
-    private void editLine(int i){Line l=lines.get(i);LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(24,12,24,12);EditText time=new EditText(this),words=new EditText(this);time.setHint("Début en secondes");time.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);time.setText(String.format(Locale.US,"%.2f",l.start/1000f));words.setText(l.text);box.addView(time);box.addView(words);new AlertDialog.Builder(this).setTitle("Corriger le passage").setView(box).setNegativeButton("Annuler",null).setPositiveButton("Enregistrer",(d,w)->{try{long v=Math.round(Double.parseDouble(time.getText().toString().replace(',','.'))*1000);if(v<0||v>900000)throw new Exception();l.start=v;l.text=words.getText().toString().trim();Collections.sort(lines,(a,b)->Long.compare(a.start,b.start));save();}catch(Exception e){status.setText("Horaire invalide");}}).show();}
-    private void refresh(){isolateVoice.setEnabled(!busy&&vocal==null&&QwenLocal.supported());engineChoice.setEnabled(!busy);for(int i=0;i<engineChoice.getChildCount();i++)engineChoice.getChildAt(i).setEnabled(!busy&&(i!=0||QwenLocal.supported()));pick.setEnabled(!busy);pickBacking.setEnabled(!busy);pickVocal.setEnabled(!busy&&source!=null);clearVocal.setEnabled(!busy&&vocal!=null);cancelAnalysis.setVisibility(analyzing?View.VISIBLE:View.GONE);cancelAnalysis.setEnabled(analyzing&&!cancelled);vocalInfo.setText(vocal==null?"Source de transcription : morceau original":"Voix pour analyse : "+fileName(vocal));analyze.setEnabled(!busy&&source!=null);play.setEnabled(!busy&&source!=null);edit.setEnabled(!busy&&!lines.isEmpty());camera.setEnabled(source!=null&&(!busy||(analyzing&&!cancelled)));pdfExport.setEnabled(!lines.isEmpty());cameraHint.setText(source==null?"Importe un morceau pour ouvrir la caméra.":analyzing?"Analyse en cours · caméra accessible en arrêtant l’analyse.":lines.isEmpty()?"Caméra disponible · pas encore de paroles enregistrées.":lines.size()+" passages disponibles · caméra et PDF prêts.");progress.setVisibility(busy?View.VISIBLE:View.GONE);if(busy){progress.setIndeterminate(percent<0);if(percent>=0)progress.setProgress(percent);}fileInfo.setText(source==null?"Aucun morceau importé":"MORCEAU IMPORTÉ\n"+fileName(source)+(prepared&&player!=null?" · "+duration(player.getDuration()):""));backingInfo.setText("Instrumental : "+(backing==null?"aucun":fileName(backing)));}
+    private void editLine(int i){Line l=lines.get(i);LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(24,12,24,12);EditText time=new EditText(this),end=new EditText(this),words=new EditText(this);time.setHint("Début en secondes");time.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);time.setText(String.format(Locale.US,"%.3f",l.start/1000.0));end.setHint("Fin en secondes");end.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);end.setText(String.format(Locale.US,"%.3f",l.end/1000.0));words.setText(l.text);box.addView(time);box.addView(end);box.addView(words);new AlertDialog.Builder(this).setTitle("Corriger le passage").setView(box).setNegativeButton("Annuler",null).setPositiveButton("Enregistrer",(d,w)->{try{long v=Math.round(Double.parseDouble(time.getText().toString().replace(',','.'))*1000);long e=Math.round(Double.parseDouble(end.getText().toString().replace(',','.'))*1000);String t=words.getText().toString().trim();if(v<0||v>=e||e>900000||t.isEmpty())throw new Exception();l.start=v;l.end=e;l.text=t;Collections.sort(lines,(a,b)->Long.compare(a.start,b.start));save();}catch(Exception e){status.setText("Horaire invalide");}}).show();}
+    private void refresh(){isolateVoice.setEnabled(!busy&&vocal==null&&QwenLocal.supported());engineChoice.setEnabled(!busy);for(int i=0;i<engineChoice.getChildCount();i++)engineChoice.getChildAt(i).setEnabled(!busy&&(i!=0||QwenLocal.supported()));pick.setEnabled(!busy);pickBacking.setEnabled(!busy);pickVocal.setEnabled(!busy&&source!=null);clearVocal.setEnabled(!busy&&vocal!=null);cancelAnalysis.setVisibility(analyzing?View.VISIBLE:View.GONE);cancelAnalysis.setEnabled(analyzing&&!cancelled);vocalInfo.setText(vocal==null?"Source de transcription : morceau original":"Voix pour analyse : "+fileName(vocal));analyze.setEnabled(!busy&&source!=null);play.setEnabled(!busy&&source!=null);edit.setEnabled(!busy&&!lines.isEmpty());camera.setEnabled(source!=null&&(!busy||(analyzing&&!cancelled)));pdfExport.setEnabled(!lines.isEmpty());subtitleExport.setEnabled(!lines.isEmpty());cameraHint.setText(source==null?"Importe un morceau pour ouvrir la caméra.":analyzing?"Analyse en cours · caméra accessible en arrêtant l’analyse.":lines.isEmpty()?"Caméra disponible · pas encore de paroles enregistrées.":lines.size()+" passages disponibles · caméra et exports prêts.");progress.setVisibility(busy?View.VISIBLE:View.GONE);if(busy){progress.setIndeterminate(percent<0);if(percent>=0)progress.setProgress(percent);}fileInfo.setText(source==null?"Aucun morceau importé":"MORCEAU IMPORTÉ\n"+fileName(source)+(prepared&&player!=null?" · "+duration(player.getDuration()):""));backingInfo.setText("Instrumental : "+(backing==null?"aucun":fileName(backing)));}
     private void save(){try{JSONObject o=new JSONObject();o.put("source",source==null?"":source.toString());o.put("backing",backing==null?"":backing.toString());o.put("lead",lead);o.put("vocal",vocal==null?"":vocal.toString());o.put("vocalPlayable",vocalPlayable==null?"":vocalPlayable.toString());o.put("playable",playable==null?"":playable.toString());o.put("backingPlayable",backingPlayable==null?"":backingPlayable.toString());JSONArray a=new JSONArray();for(Line l:lines){JSONArray x=new JSONArray();x.put(l.start);x.put(l.end);x.put(l.text);a.put(x);}o.put("lines",a);getSharedPreferences("music_prompter",0).edit().putString("project",o.toString()).apply();}catch(Exception ignored){}}
     private void load(){try{JSONObject o=new JSONObject(getSharedPreferences("music_prompter",0).getString("project","{}"));String s=o.optString("source"),b=o.optString("backing");source=s.isEmpty()?null:Uri.parse(s);backing=b.isEmpty()?null:Uri.parse(b);String pp=o.optString("playable"),bp=o.optString("backingPlayable");playable=pp.isEmpty()?null:Uri.parse(pp);backingPlayable=bp.isEmpty()?null:Uri.parse(bp);String v=o.optString("vocal"),vp=o.optString("vocalPlayable");vocal=v.isEmpty()?null:Uri.parse(v);vocalPlayable=vp.isEmpty()?null:Uri.parse(vp);lead=o.optInt("lead",1000);JSONArray a=o.optJSONArray("lines");if(a!=null)for(int i=0;i<a.length();i++){JSONArray x=a.getJSONArray(i);lines.add(new Line(x.getLong(0),x.getLong(1),x.getString(2)));}if(source!=null)prepare(music());}catch(Exception ignored){}}
     private void releasePlayer(){prepared=false;if(player!=null){player.release();player=null;}}

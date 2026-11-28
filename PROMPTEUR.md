@@ -23,3 +23,6 @@ Les trois poids (Qwen 0.6B, UVR et Whisper Turbo) sont inclus dans l'APK de prod
 
 ## v1.15.4
 Caméra en haut de l'écran, avant/arrière et vertical/horizontal, accessible sans transcription complète. Si une analyse est en cours, l'utilisateur peut la conserver ou l'arrêter avant d'ouvrir la caméra. Export PDF A4 des paroles sauvegardées, avec ou sans horaires, via le sélecteur Android; pagination et test de lecture multipage. La musique originale reste la seule piste de l'export vidéo. Modèles embarqués et signature historique inchangés.
+
+## v1.15.5
+Whisper Turbo sans UVR par défaut (nouveaux réglages modifiables), décodage greedy à un candidat, Qwen par fenêtres de 12 s. Les trois modèles restent embarqués. Exports PDF détaillé, TXT, SRT et WebVTT UTF-8 avec début/fin corrigibles. Partage via Android. Les horaires Qwen restent approximatifs; aucun alignement mot par mot ni gain de vitesse garanti avant mesure sur téléphone.
