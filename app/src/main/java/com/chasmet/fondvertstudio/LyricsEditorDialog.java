@@ -38,6 +38,7 @@ final class LyricsEditorDialog {
     private TextView clock,info,preview;
     private EditText start,end,words;
     private LinearLayout panel,list;
+    private ScrollView editorScroll;
     private Button play,save,undoButton;
     private final int fg=0xfff4f6f7, accent=0xff58e4b0, bg=0xff10171c;
     LyricsEditorDialog(Context c,Uri u,long length,long position,ArrayList<LyricsTimeline.Row> data,Saved callback){
@@ -57,9 +58,10 @@ final class LyricsEditorDialog {
         LinearLayout transport=horizontal(root);button(transport,"− 1 s",()->jump(position()-1000));play=button(transport,"Lecture",this::toggle);button(transport,"+ 1 s",()->jump(position()+1000));play.setEnabled(false);
         preview=text(root,"",14,accent);preview.setMaxLines(2);
         info=text(root,"Préparation de la musique…",13,fg);
-        ScrollView scroll=new ScrollView(c);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        ScrollView scroll=new ScrollView(c);editorScroll=scroll;root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout content=new LinearLayout(c);content.setOrientation(LinearLayout.VERTICAL);scroll.addView(content);
         LinearLayout add=horizontal(content);button(add,"+ Passage ici",()->addAt(position()));button(add,"+ Couplets",this::bulk);
+        LinearLayout addManual=horizontal(content);button(addManual,"+ Horaire précis",()->manual(false));button(addManual,"Aller à un horaire",this::goTo);
         panel=new LinearLayout(c);panel.setOrientation(LinearLayout.VERTICAL);content.addView(panel);
         text(panel,"Début et fin : mm:ss.mmm, secondes ou 64000 ms",13,fg);
         LinearLayout times=horizontal(panel);start=field(times,"Début",false);end=field(times,"Fin",false);
@@ -69,6 +71,7 @@ final class LyricsEditorDialog {
         words=field(panel,"Paroles du passage (plusieurs lignes possibles)",true);
         LinearLayout actions=horizontal(panel);button(actions,"Appliquer",()->{if(apply()){rebuild();notice("Passage modifié");}});button(actions,"Écouter",this::listen);
         LinearLayout more=horizontal(panel);button(more,"Scinder ici",this::split);button(more,"Supprimer",this::remove);
+        LinearLayout duplicate=horizontal(panel);button(duplicate,"Dupliquer à un autre horaire",()->manual(true));
         text(content,"PASSAGES · toucher pour modifier",16,accent);
         list=new LinearLayout(c);list.setOrientation(LinearLayout.VERTICAL);content.addView(list);
         dialog.setContentView(root);dialog.setCancelable(false);
@@ -119,7 +122,7 @@ final class LyricsEditorDialog {
         for(LyricsTimeline.Row r:rows){
             TextView v=text(list,LyricsTimeline.format(r.start)+"  →  "+LyricsTimeline.format(r.end)+"\n"+(r.text.isEmpty()?"(passage à compléter)":r.text),16,r==selected?accent:fg);
             v.setBackgroundColor(r==selected?0xff243b39:0xff182229);v.setPadding(dp(10),dp(9),dp(10),dp(9));
-            v.setOnClickListener(view->{if(!apply())return;select(r);jump(r.start);rebuild();});
+            v.setOnClickListener(view->{if(!apply())return;select(r);jump(r.start);rebuild();editorScroll.smoothScrollTo(0,0);});
         }
     }
     private void addAt(long at){if(!apply())return;try{
@@ -131,6 +134,27 @@ final class LyricsEditorDialog {
     private void split(){if(selected==null)return;int cursor=words.getSelectionStart();long at=position();if(!apply())return;try{ArrayList<LyricsTimeline.Row> before=LyricsTimeline.copy(rows);LyricsTimeline.Row r=LyricsTimeline.split(rows,selected,at,cursor);undo.push(before);dirty=true;select(r);rebuild();notice("Passage scindé en deux");}catch(IllegalArgumentException ex){notice(ex.getMessage());}}
     private void remove(){if(selected==null)return;new AlertDialog.Builder(context).setTitle("Supprimer ce passage ?").setNegativeButton("Annuler",null).setPositiveButton("Supprimer",(d,w)->{snapshot();rows.remove(selected);select(rows.isEmpty()?null:rows.get(0));rebuild();notice("Passage supprimé · action annulable");}).show();}
     private void undo(){if(undo.isEmpty())return;rows=undo.pop();select(rows.isEmpty()?null:rows.get(0));rebuild();notice("Dernière action annulée");}
+    private void goTo(){
+        EditText input=new EditText(context);input.setSingleLine(true);input.setHint("01:04.000 ou 64000 ms");input.setText(LyricsTimeline.format(position()));
+        AlertDialog box=new AlertDialog.Builder(context).setTitle("Aller à un horaire").setView(input).setNegativeButton("Annuler",null).setPositiveButton("Aller",null).create();
+        box.setOnShowListener(d->box.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{try{long ms=LyricsTimeline.parse(input.getText().toString());if(ms<0||ms>duration)throw new IllegalArgumentException("Horaire hors morceau");jump(ms);box.dismiss();}catch(IllegalArgumentException ex){input.setError(ex.getMessage());}}));box.show();
+    }
+    private void manual(boolean duplicate){
+        if(!apply())return;
+        if(duplicate&&selected==null)return;
+        long at=position();
+        LinearLayout body=new LinearLayout(context);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(12),0,dp(12),0);
+        EditText from=new EditText(context),to=new EditText(context);
+        from.setSingleLine(true);from.setHint("Début : 64000 ms");from.setText(LyricsTimeline.format(at));body.addView(from);
+        to.setSingleLine(true);to.setHint("Fin : 68000 ms");to.setText(LyricsTimeline.format(Math.min(duration,at+(duplicate?selected.end-selected.start:4000))));body.addView(to);
+        EditText input=field(body,"Écris les paroles manquantes",true);if(duplicate)input.setText(selected.text);
+        AlertDialog box=new AlertDialog.Builder(context).setTitle(duplicate?"Dupliquer un passage":"Ajouter à un horaire précis").setView(body).setNegativeButton("Annuler",null).setPositiveButton("Ajouter",null).create();
+        box.setOnShowListener(d->box.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{try{
+            long s=LyricsTimeline.parse(from.getText().toString()),e=LyricsTimeline.parse(to.getText().toString());String value=input.getText().toString().trim();LyricsTimeline.validate(s,e,duration,value);
+            for(LyricsTimeline.Row r:rows)if(r.start==s)throw new IllegalArgumentException("Un passage commence déjà à cet instant");
+            snapshot();LyricsTimeline.Row row=new LyricsTimeline.Row(s,e,value);rows.add(row);LyricsTimeline.sort(rows);select(row);jump(s);rebuild();editorScroll.smoothScrollTo(0,0);box.dismiss();notice("Passage ajouté à "+LyricsTimeline.format(s));
+        }catch(IllegalArgumentException ex){input.setError(ex.getMessage());}}));box.show();
+    }
     private void bulk(){
         if(!apply())return;
         LinearLayout body=new LinearLayout(context);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(12),0,dp(12),0);

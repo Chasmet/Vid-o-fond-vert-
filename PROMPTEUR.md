@@ -29,3 +29,6 @@ Whisper Turbo sans UVR par défaut (nouveaux réglages modifiables), décodage g
 
 ## v1.15.6 — éditeur de paroles
 Éditeur plein écran non destructif, lecture et curseur au millième, saisie 01:04.000 / 64,000 s / 64000 ms, ajustement début/fin ±100 ms, marquage à la position de lecture, écoute du passage, ajout de passages et de couplets (option de répartition temporelle approximative par ligne), scission au curseur audio et texte, suppression et annulation. Enregistrement explicite dans le projet existant, compatible caméra/PDF/TXT/SRT/VTT. Les périodes sans paroles ne prolongent plus le passage précédent. Pas de modification des modèles ni de signature. Les horaires manuels restent à vérifier à l'écoute.
+
+## v1.15.7
+Ajout direct par saisie début/fin sans déplacer le curseur, duplication de refrain/couplet, navigation vers un horaire exact et retour automatique au panneau d'édition à la sélection. Correctifs de compatibilité API anciennes et de cycle de vie du lecteur. Les modèles inclus et l'export restent inchangés.
