@@ -11,7 +11,7 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.*;
 
-/** Foreground-only client of the existing CHK Universal Control HTTPS protocol. */
+/** Persistent foreground-service client of the CHK Universal Control HTTPS protocol. */
 final class PrompterMcpClient {
     interface Target { JSONObject execute(String action,JSONObject args)throws Exception; }
     interface Callback { void done(boolean ok,String message); }
@@ -32,7 +32,7 @@ final class PrompterMcpClient {
         store=new AtomicFile(new File(c.getNoBackupFilesDir(),"fondvert-mcp.json"));
         try(FileInputStream in=store.openRead()){state=new JSONObject(read(in,500000));}catch(Exception ignored){}
         base=state.optString("base");paired=!state.optString("id").isEmpty()&&!state.optString("secret").isEmpty();enabled=state.optBoolean("enabled",false);
-        status=paired?(enabled?"Associé · ouverture du prompteur requise":"Associé · désactivé"):"Non associé";
+        status=paired?(enabled?"Associé · démarrage du service":"Associé · désactivé"):"Non associé";
     }
     String status(){return status;}
     String base(){return base;}
@@ -106,7 +106,7 @@ final class PrompterMcpClient {
             if(!allowed(action))result=new JSONObject().put("ok",false).put("message","Commande non autorisée");
             else {
                 FutureTask<JSONObject> work=new FutureTask<>(()->{
-                    if(!active||closed||!enabled||session!=epoch)throw new IOException("Ouvre le prompteur et active MCP");
+                    if(!active||closed||!enabled||session!=epoch)throw new IOException("Active la connexion MCP dans les réglages");
                     return target.execute(action,params);
                 });
                 main.post(work);
