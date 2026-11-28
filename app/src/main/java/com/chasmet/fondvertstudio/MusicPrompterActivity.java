@@ -298,23 +298,6 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private void toggle(){if(busy)return;if(player==null)prepare(music());if(player!=null){if(player.isPlaying())player.pause();else player.start();}}
     private final Runnable tick=new Runnable(){public void run(){if(dead)return;if(mcp!=null&&mcpStatus!=null&&!mcpStatus.getText().toString().equals(mcp.status()))mcpStatus.setText(mcp.status());if(PrompterMcpService.analyzing())status.setText("MCP : "+PrompterMcpService.analysisLabel());if(analyzing){status.setText(phase+(analysisProgress>0?" · "+analysisProgress+" %":"")+" · "+duration(SystemClock.elapsedRealtime()-startedAt));}if(player!=null&&!drag){try{int t=player.getCurrentPosition();seek.setProgress(t);render(t);}catch(Exception ignored){}}ui.postDelayed(this,80);}};
     private void render(long t){clock.setText(duration(t)+" / "+duration(player==null?0:player.getDuration()));long at=t+lead;active=-1;int upcoming=-1;for(int i=0;i<lines.size();i++){Line l=lines.get(i);if(l.start>at){upcoming=i;break;}if(at<l.end)active=i;}current.setText(active<0?"Prépare-toi…":lines.get(active).text);next.setText(upcoming>=0?lines.get(upcoming).text:"");}
-    private void showMcp(){
-        if(mcp.paired()){
-            String[] options={mcp.enabled()?"Désactiver le pilotage":"Activer le pilotage","Dissocier ce téléphone"};
-            
-            new AlertDialog.Builder(this).setTitle("Connexion ChatGPT · "+mcp.status()).setItems(options,(d,i)->{
-                if(i==0){boolean on=!mcp.enabled();mcp.setEnabled(on);if(on)startMcpService();else PrompterMcpService.stop(this);}
-                else new AlertDialog.Builder(this).setTitle("Dissocier ?").setMessage("Le pilotage distant sera arrêté. Tes paroles et médias seront conservés.").setNegativeButton("Annuler",null).setPositiveButton("Dissocier",(q,w)->mcp.unlink((ok,msg)->{PrompterMcpService.stop(this);Toast.makeText(this,msg,Toast.LENGTH_LONG).show();})).show();
-            }).setNegativeButton("Fermer",null).show();return;
-        }
-        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(24,8,24,8);
-        TextView help=new TextView(this);help.setText("Utilise CHK Browser Local 3 dans ChatGPT pour générer une invitation à usage unique. Le serveur doit être accessible en HTTPS. Les textes sont transmis uniquement sur demande MCP.");box.addView(help);
-        EditText url=new EditText(this);url.setSingleLine(true);url.setHint("Adresse HTTPS du serveur /mcp");url.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);url.setText(mcp.base());box.addView(url);
-        EditText invite=new EditText(this);invite.setSingleLine(true);invite.setHint("Invitation chkinvite_…");invite.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);box.addView(invite);
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Associer ChatGPT").setView(box).setNegativeButton("Annuler",null).setPositiveButton("Associer",null).create();
-        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);mcp.pair(url.getText().toString(),invite.getText().toString(),(ok,msg)->{if(isFinishing())return;if(ok){dialog.dismiss();startMcpService();Toast.makeText(this,msg,Toast.LENGTH_LONG).show();}else{invite.setError(msg);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);}});}));
-        dialog.show();
-    }
     private JSONArray mcpLines()throws Exception{
         JSONArray out=new JSONArray();for(Line l:lines)out.put(new JSONArray().put(l.start).put(l.end).put(l.text));return out;
     }
@@ -381,7 +364,7 @@ public final class MusicPrompterActivity extends AppCompatActivity {
     private void save(){try{JSONObject o=new JSONObject();o.put("source",source==null?"":source.toString());o.put("backing",backing==null?"":backing.toString());o.put("lead",lead);if(player!=null&&prepared)o.put("duration_ms",player.getDuration());o.put("vocal",vocal==null?"":vocal.toString());o.put("vocalPlayable",vocalPlayable==null?"":vocalPlayable.toString());o.put("playable",playable==null?"":playable.toString());o.put("backingPlayable",backingPlayable==null?"":backingPlayable.toString());JSONArray a=new JSONArray();for(Line l:lines){JSONArray x=new JSONArray();x.put(l.start);x.put(l.end);x.put(l.text);a.put(x);}o.put("lines",a);getSharedPreferences("music_prompter",0).edit().putString("project",o.toString()).apply();}catch(Exception ignored){}}
     private void load(){try{JSONObject o=new JSONObject(getSharedPreferences("music_prompter",0).getString("project","{}"));String s=o.optString("source"),b=o.optString("backing");source=s.isEmpty()?null:Uri.parse(s);backing=b.isEmpty()?null:Uri.parse(b);String pp=o.optString("playable"),bp=o.optString("backingPlayable");playable=pp.isEmpty()?null:Uri.parse(pp);backingPlayable=bp.isEmpty()?null:Uri.parse(bp);String v=o.optString("vocal"),vp=o.optString("vocalPlayable");vocal=v.isEmpty()?null:Uri.parse(v);vocalPlayable=vp.isEmpty()?null:Uri.parse(vp);lead=o.optInt("lead",1000);JSONArray a=o.optJSONArray("lines");if(a!=null)for(int i=0;i<a.length();i++){JSONArray x=a.getJSONArray(i);lines.add(new Line(x.getLong(0),x.getLong(1),x.getString(2)));}if(source!=null)prepare(music());}catch(Exception ignored){}}
     private void releasePlayer(){prepared=false;if(player!=null){player.release();player=null;}}
-    @Override protected void onResume(){super.onResume();mcpVisible=true;if(mcp!=null&&mcp.enabled()&&mcp.paired())startMcpService();}
-    @Override protected void onPause(){super.onPause();mcpVisible=false;if(lyricsEditor!=null)lyricsEditor.pausePlayback();if(player!=null&&player.isPlaying())player.pause();}
+    @Override protected void onResume(){super.onResume();mcpVisible=true;ui.removeCallbacks(tick);ui.post(tick);if(mcp!=null&&mcp.enabled()&&mcp.paired())startMcpService();}
+    @Override protected void onPause(){super.onPause();mcpVisible=false;ui.removeCallbacks(tick);if(lyricsEditor!=null)lyricsEditor.pausePlayback();if(player!=null&&player.isPlaying())player.pause();}
     @Override protected void onDestroy(){dead=true;PrompterMcpService.detach(this);if(lyricsEditor!=null)lyricsEditor.dispose();ui.removeCallbacksAndMessages(null);worker.shutdownNow();releasePlayer();super.onDestroy();}
 }
